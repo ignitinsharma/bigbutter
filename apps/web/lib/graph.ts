@@ -21,3 +21,15 @@ export function buildGraph(notes: Note[]): { nodes: GraphNode[]; links: GraphLin
   const nodes = notes.map(n => ({ id: n.id, note: n, deg: deg[n.id] || 0, r: 8 + Math.min(10, (deg[n.id] || 0) * 2) }));
   return { nodes, links };
 }
+
+export function linksOf(id: string, notes: Note[]): { other: Note; shared: string[] }[] {
+  const { links } = buildGraph(notes);
+  return links
+    .filter(l => l.source === id || l.target === id)
+    .map(l => ({
+      other: notes.find(e => e.id === (l.source === id ? l.target : l.source))!,
+      shared: l.shared,
+    }))
+    .filter(x => x.other)
+    .sort((a, b) => b.shared.length - a.shared.length);
+}
