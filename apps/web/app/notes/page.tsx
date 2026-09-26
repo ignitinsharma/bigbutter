@@ -3,12 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api";
 import type { Note } from "../../lib/types";
 import { buildGraph } from "../../lib/graph";
+import NoteInput from "../../components/NoteInput";
 
 export default function Notes() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [listening, setListening] = useState(false); // wired to SpeechRecognition in F3
   const [view, setView] = useState<"stream" | "map">("stream");
 
   useEffect(() => { api("/notes").then(r => setNotes(Array.isArray(r) ? r : [])).catch(() => {}).finally(() => setLoading(false)); }, []);
@@ -36,18 +38,8 @@ export default function Notes() {
 
         <div className="grid gap-6 md:grid-cols-[320px_1fr]">
           <div className="md:sticky md:top-5 self-start">
-            <div className="rounded bg-card border border-line p-4 mb-4">
-              <textarea rows={5} value={text} onChange={e => setText(e.target.value)}
-                onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") save(); }}
-                placeholder="Type the thought… (⌘+Enter to save)"
-                className="w-full bg-transparent resize-y font-sans text-[15px] leading-relaxed outline-none placeholder:text-faint" />
-              <div className="flex gap-2 mt-3">
-                <button onClick={save} disabled={busy || !text.trim()}
-                  className="btn-press flex-1 rounded text-[13px] font-medium px-4 py-2 bg-ink text-card disabled:opacity-40">
-                  {busy ? "Filing…" : "Save"}
-                </button>
-              </div>
-            </div>
+            <NoteInput draft={text} setDraft={setText} onSave={save} busy={busy}
+              listening={listening} onToggleSpeak={() => setListening(v => !v)} />
           </div>
 
           <div>
