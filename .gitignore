@@ -8,3 +8,5 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+# ponytail: planning docs stay local-only, never pushed
+*.md
