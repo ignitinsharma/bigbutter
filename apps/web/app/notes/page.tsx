@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import type { Note, NoteType } from "../../lib/types";
 import { buildGraph } from "../../lib/graph";
+import { createVoice, supported as srSupported } from "../../lib/voice";
 import NoteInput from "../../components/NoteInput";
 import NoteList from "../../components/NoteList";
 import FilterChips from "../../components/FilterChips";
@@ -19,6 +20,38 @@ export default function Notes() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | NoteType>("all");
   const [notice, setNotice] = useState("");
+  const voice = useRef<{ stop: () => void } | null>(null);
+
+  const stopVoice = () => {
+    try { voice.current?.stop(); } catch { /* already stopped */ }
+    voice.current = null;
+    setListening(false);
+  };
+
+  const toggleSpeak = () => {
+    if (listening) { stopVoice(); return; }
+    if (!srSupported()) { setNotice("This browser has no speech recognition — try Chrome, or type instead."); return; }
+    if (!window.isSecureContext) { setNotice("Dictation is blocked on insecure origins — open this page via localhost or HTTPS."); return; }
+    setNotice("");
+    const v = createVoice({
+      base: text,
+      onText: setText,
+      onError: code => {
+        voice.current = null;
+        setListening(false);
+        if (code === "not-allowed") setNotice("Microphone blocked. Allow mic access in the browser site settings, then try again.");
+        else if (code === "service-not-allowed") setNotice("Dictation is blocked here — use localhost or HTTPS (Chrome disables the mic on insecure origins).");
+        else if (code === "audio-capture") setNotice("No microphone found. Check it's plugged in and not used by another app.");
+        else if (code === "no-speech") setNotice("Didn't catch that — hit Speak and try again.");
+        else if (code === "network") setNotice("Speech service unreachable — check connection, VPN, or ad-blocker. Typing still works.");
+        else setNotice(`Microphone stopped (${code}). Check permissions and try again.`);
+      },
+      onEnd: () => { voice.current = null; setListening(false); },
+    });
+    voice.current = v;
+    v.start();
+    setListening(true);
+  };
 
   useEffect(() => {
     api("/notes")
@@ -41,6 +74,7 @@ export default function Notes() {
 
   const save = async () => {
     if (!text.trim() || busy) return;
+    if (listening) stopVoice();
     setBusy(true);
     setNotice("");
     try {
@@ -67,7 +101,7 @@ export default function Notes() {
         <div className="grid gap-6 md:grid-cols-[320px_1fr]">
           <div className="md:sticky md:top-5 self-start">
             <NoteInput draft={text} setDraft={setText} onSave={save} busy={busy}
-              listening={listening} onToggleSpeak={() => setListening(v => !v)} />
+              listening={listening} onToggleSpeak={toggleSpeak} />
             <FilterChips counts={counts} total={notes.length} active={filter}
               onPick={t => setFilter(f => (f === t ? "all" : t))} />
           </div>

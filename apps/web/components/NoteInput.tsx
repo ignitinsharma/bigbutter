@@ -15,10 +15,10 @@ export default function NoteInput({ draft, setDraft, onSave, busy, listening, on
       <textarea id="draft" rows={5} value={draft} onChange={e => setDraft(e.target.value)}
         onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSave(); }}
         placeholder={listening ? "Listening — keep talking, or keep typing…" : "Type the thought, or hit Speak and say it"}
-        className="w-full bg-transparent resize-y font-sans text-[15px] leading-relaxed outline-none placeholder:text-faint" />
+        className="field w-full bg-transparent resize-y font-sans text-[15px] leading-relaxed outline-none placeholder:text-faint" />
       <div className="flex gap-2 mt-3">
         <button onClick={onToggleSpeak}
-          className={`btn-press rounded text-[13px] font-medium px-4 py-2 ${listening ? "text-white" : "bg-[#E5E1D6] text-[#4A4437]"}`}
+          className={`btn-press rounded text-[13px] font-medium px-4 py-2 ${listening ? "pulse text-white" : "bg-[#E5E1D6] text-[#4A4437]"}`}
           style={listening ? { background: "#8A3C56" } : undefined}>
           {listening ? "Stop" : "Speak"}
         </button>

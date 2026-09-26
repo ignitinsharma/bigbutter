@@ -21,9 +21,9 @@ export default function Login() {
       <div className="anim-enter w-full max-w-sm rounded bg-card border border-line p-7">
         <h1 className="font-serif text-3xl">Everything you said</h1>
         <p className="text-sm text-muted mt-1 mb-5">Type it or say it — filed, tagged, connected.</p>
-        <input className="w-full text-sm bg-card border border-line rounded px-3 py-2 mb-3 placeholder:text-faint"
+        <input className="field w-full text-sm bg-card border border-line rounded px-3 py-2 mb-3 placeholder:text-faint"
           placeholder="email" value={email} onChange={e => setEmail(e.target.value)} />
-        <input className="w-full text-sm bg-card border border-line rounded px-3 py-2 mb-4 placeholder:text-faint"
+        <input className="field w-full text-sm bg-card border border-line rounded px-3 py-2 mb-4 placeholder:text-faint"
           placeholder="password" type="password" value={password}
           onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && go()} />
         {err && <p className="text-sm mb-3" style={{ color: "#8C4426" }}>{err}</p>}
