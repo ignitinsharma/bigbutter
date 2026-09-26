@@ -2,11 +2,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import type { Note, NoteType } from "../../lib/types";
-import { buildGraph } from "../../lib/graph";
+import { buildGraph, linksOf } from "../../lib/graph";
 import { createVoice, supported as srSupported } from "../../lib/voice";
 import NoteInput from "../../components/NoteInput";
 import NoteList from "../../components/NoteList";
 import FilterChips from "../../components/FilterChips";
+import GraphView from "../../components/GraphView";
 import Notice from "../../components/Notice";
 
 export default function Notes() {
@@ -130,10 +131,43 @@ export default function Notes() {
             </div>
 
             {view === "map" ? (
-              <div className="rounded bg-card border border-line p-7 text-center">
-                <h2 className="font-serif text-xl">Map arrives in F4</h2>
-                <p className="text-sm text-muted mt-2">The force-directed graph plugs into this toggle once the entry cards land.</p>
-              </div>
+              notes.length === 0 ? (
+                <div className="rounded bg-card border border-line p-7 text-center">
+                  <h2 className="font-serif text-xl">Nothing filed yet</h2>
+                  <p className="text-sm text-muted mt-2">Save a note first — the map draws itself from shared tags and people.</p>
+                </div>
+              ) : (
+                <>
+                  <GraphView
+                    nodes={graph.nodes.map(n => ({ id: n.id, title: n.note.title || n.note.raw_text.slice(0, 24), type: (n.note.type || "note") as NoteType, deg: n.deg, r: n.r }))}
+                    links={graph.links} sel={sel} onSelect={setSel} />
+                  <p className="text-xs text-muted mt-2">
+                    {graph.nodes.filter(n => n.deg > 0).length} of {graph.nodes.length} notes connected · {graph.links.length} links · drag to rearrange, tap to trace
+                  </p>
+                  {(() => {
+                    const s = notes.find(n => n.id === sel);
+                    if (!s) return null;
+                    const rel = linksOf(s.id, notes);
+                    return (
+                      <div className="anim-enter rounded bg-card border border-line p-4 mt-3">
+                        <h2 className="font-serif text-lg">{s.title || s.raw_text.slice(0, 60)}</h2>
+                        {s.summary && <p className="text-sm text-soft mt-1">{s.summary}</p>}
+                        {rel.length ? (
+                          <div className="mt-2">
+                            <p className="text-[13px] text-muted mb-1">Connected to</p>
+                            {rel.map(x => (
+                              <button key={x.other.id} className="block w-full text-left py-1" onClick={() => setSel(x.other.id)}>
+                                <span className="text-[13.5px] text-[#1F5E77]">{x.other.title}</span>
+                                <span className="text-xs text-faint"> — via {x.shared.join(", ")}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : <p className="text-sm text-faint mt-2">Nothing else touches this yet.</p>}
+                      </div>
+                    );
+                  })()}
+                </>
+              )
             ) : loading ? (
               <div className="flex flex-col gap-3">{[0, 1, 2].map(i => <div key={i} className="skeleton h-24 rounded" />)}</div>
             ) : notes.length === 0 ? (
