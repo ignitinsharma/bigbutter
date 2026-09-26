@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+pgvector
+openai
+bcrypt
+python-jose[cryptography]
+pydantic-settings

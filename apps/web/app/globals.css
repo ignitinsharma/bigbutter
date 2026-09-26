@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper:#EFEDE6; --card:#FAF9F6; --line:#DCD7CA; --ink:#241C33;
+  --soft:#413B31; --muted:#6B6558; --faint:#9A9384; --accent:#8A5A00;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: Inter, system-ui, sans-serif; font-size: 15px; line-height: 1.6; }
+h1, h2 { font-family: Newsreader, Georgia, serif; font-weight: 400; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* subtle motion (F2.6) — 150-250ms ease-out, off under reduced motion */
+@keyframes fadeSlide { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.anim-enter { animation: fadeSlide 200ms ease-out both; }
+.btn-press:active { transform: scale(.97); }
+.chip-lift { transition: transform 180ms ease-out, background 180ms ease-out; }
+.chip-lift:hover { transform: translateY(-1px); }
+.skeleton { background: linear-gradient(90deg, #E5E1D6 25%, #F2EEE3 50%, #E5E1D6 75%); background-size: 800px 100%; animation: shimmer 1.4s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .anim-enter, .skeleton { animation: none; }
+  .chip-lift:hover { transform: none; }
+}

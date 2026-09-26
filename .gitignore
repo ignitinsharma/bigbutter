@@ -1,0 +1,10 @@
+# ponytail: minimal ignores for secrets + build bloat
+.env
+.env.*
+node_modules/
+.next/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
