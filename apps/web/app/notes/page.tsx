@@ -180,7 +180,12 @@ export default function Notes() {
             ) : (
               <NoteList notes={visible} sel={sel}
                 onToggle={id => setSel(s => (s === id ? null : id))}
-                onSetType={(id, t: NoteType) => setNotes(ns => ns.map(n => (n.id === id ? { ...n, type: t } : n)))}
+                onSetType={async (id, t: NoteType) => {
+                  try {
+                    await api(`/notes/${id}`, { method: "PUT", body: JSON.stringify({ type: t }) });
+                    setNotes(ns => ns.map(n => (n.id === id ? { ...n, type: t } : n)));
+                  } catch { setNotice("Couldn't save the type — is the API running?"); }
+                }}
                 onTag={t => setQuery(t)}
                 onDelete={async id => { setSel(null); await api(`/notes/${id}`, { method: "DELETE" }).catch(() => {}); setNotes(await api("/notes").catch(() => notes)); }} />
             )}
