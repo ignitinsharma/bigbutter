@@ -21,6 +21,8 @@ export default function Notes() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | NoteType>("all");
   const [notice, setNotice] = useState("");
+  const [remote, setRemote] = useState<Note[] | null>(null); // backend /search rows; null = local filter
+  const [summary, setSummary] = useState("");
   const voice = useRef<{ stop: () => void } | null>(null);
 
   const stopVoice = () => {
@@ -67,11 +69,27 @@ export default function Notes() {
     return c;
   }, [notes]);
   const q = query.trim().toLowerCase();
-  const visible = notes.filter(n => {
+  const localVisible = notes.filter(n => {
     if (filter !== "all" && (n.type || "note") !== filter) return false;
     if (!q) return true;
     return `${n.title || ""} ${n.summary || ""} ${(n.tags || []).join(" ")} ${n.raw_text}`.toLowerCase().includes(q);
   });
+  const visible = (remote ?? localVisible).filter(n => filter === "all" || (n.type || "note") === filter);
+  const matched = remote ? remote.map(n => n.id) : null;
+
+  // Backend search when available; 501/no-key falls back to the local filter above.
+  useEffect(() => {
+    if (!q) { setRemote(null); setSummary(""); return; }
+    let live = true;
+    const t = setTimeout(async () => {
+      try {
+        const r = await api(`/search?q=${encodeURIComponent(query.trim())}`);
+        if (!live || r?.error) return;
+        if (live) { setRemote(Array.isArray(r.notes) ? r.notes : []); setSummary(r.summary || ""); }
+      } catch { /* offline → local filter */ }
+    }, 400);
+    return () => { live = false; clearTimeout(t); };
+  }, [query]);
 
   const save = async () => {
     if (!text.trim() || busy) return;
@@ -140,7 +158,7 @@ export default function Notes() {
                 <>
                   <GraphView
                     nodes={graph.nodes.map(n => ({ id: n.id, title: n.note.title || n.note.raw_text.slice(0, 24), type: (n.note.type || "note") as NoteType, deg: n.deg, r: n.r }))}
-                    links={graph.links} sel={sel} onSelect={setSel} />
+                    links={graph.links} sel={sel} onSelect={setSel} focusIds={matched} />
                   <p className="text-xs text-muted mt-2">
                     {graph.nodes.filter(n => n.deg > 0).length} of {graph.nodes.length} notes connected · {graph.links.length} links · drag to rearrange, tap to trace
                   </p>
@@ -178,8 +196,14 @@ export default function Notes() {
             ) : visible.length === 0 ? (
               <p className="text-sm text-muted">Nothing matches that.</p>
             ) : (
-              <NoteList notes={visible} sel={sel}
-                onToggle={id => setSel(s => (s === id ? null : id))}
+              <>
+                {summary && (
+                  <div className="anim-enter rounded bg-card border border-line p-4 mb-3" style={{ borderLeft: "3px solid var(--accent)" }}>
+                    <p className="text-sm text-soft">{summary}</p>
+                  </div>
+                )}
+                <NoteList notes={visible} sel={sel} highlightIds={matched}
+                  onToggle={id => setSel(s => (s === id ? null : id))}
                 onSetType={async (id, t: NoteType) => {
                   try {
                     await api(`/notes/${id}`, { method: "PUT", body: JSON.stringify({ type: t }) });
@@ -188,6 +212,7 @@ export default function Notes() {
                 }}
                 onTag={t => setQuery(t)}
                 onDelete={async id => { setSel(null); await api(`/notes/${id}`, { method: "DELETE" }).catch(() => {}); setNotes(await api("/notes").catch(() => notes)); }} />
+              </>
             )}
           </div>
         </div>

@@ -8,13 +8,15 @@ import { when } from "../lib/format";
 type Props = {
   notes: Note[];
   sel: string | null;
+  highlightIds?: string[] | null;
   onToggle: (id: string) => void;
   onSetType: (id: string, t: NoteType) => void;
   onTag: (tag: string) => void;
   onDelete: (id: string) => void;
 };
 
-export default function NoteList({ notes, sel, onToggle, onSetType, onTag, onDelete }: Props) {
+export default function NoteList({ notes, sel, highlightIds, onToggle, onSetType, onTag, onDelete }: Props) {
+  const hot = highlightIds ? new Set(highlightIds) : null;
   return (
     <div className="flex flex-col gap-3">
       {notes.map(e => {
@@ -22,7 +24,8 @@ export default function NoteList({ notes, sel, onToggle, onSetType, onTag, onDel
         const open = sel === e.id;
         const rel = linksOf(e.id, notes);
         return (
-          <article key={e.id} className="anim-enter rounded bg-card border border-line p-4" style={{ borderLeft: `3px solid ${t.hue}` }}>
+          <article key={e.id} className="anim-enter rounded bg-card border border-line p-4"
+            style={{ borderLeft: `3px solid ${t.hue}`, ...(hot && hot.has(e.id) ? { boxShadow: "0 0 0 2px var(--accent)" } : null) }}>
             <div className="flex justify-between gap-3 items-baseline">
               <h2 className="font-serif text-lg leading-snug cursor-pointer" onClick={() => onToggle(e.id)}>{e.title || e.raw_text.slice(0, 60)}</h2>
               {e.created_at && <span className="text-xs text-faint whitespace-nowrap">{when(e.created_at)}</span>}

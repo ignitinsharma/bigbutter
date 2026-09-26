@@ -28,9 +28,10 @@ type Props = {
   links: GraphLink[];
   sel: string | null;
   onSelect: (id: string | null) => void;
+  focusIds?: string[] | null;
 };
 
-export default function GraphView({ nodes, links, sel, onSelect }: Props) {
+export default function GraphView({ nodes, links, sel, onSelect, focusIds }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const selRef = useRef(sel);
   selRef.current = sel;
@@ -135,9 +136,13 @@ export default function GraphView({ nodes, links, sel, onSelect }: Props) {
     });
 
     if (selRef.current) highlight(selRef.current);
+    else if (focusIds && focusIds.length) {
+      const keep = new Set(focusIds);
+      nodeG.attr("opacity", d => (keep.has(d.id) ? 1 : 0.25));
+    }
     return () => { sim.stop(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, links]);
+  }, [nodes, links, JSON.stringify(focusIds)]);
 
   // re-highlight when selection changes without rebuilding the sim
   useEffect(() => {

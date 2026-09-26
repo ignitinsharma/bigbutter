@@ -35,7 +35,7 @@ async def _enrich(s: AsyncSession, uid: str, nid: str, raw: str):
         {"ti": rec["title"], "ty": rec["type"], "su": rec["summary"], "ta": rec["tags"], "pe": rec["people"], "ac": rec["action_items"], "i": nid},
     )
     await s.execute(
-        text("INSERT INTO note_embeddings (note_id, embedding, model_version) VALUES (:i, :e, :m) ON CONFLICT (note_id) DO UPDATE SET embedding=:e, model_version=:m"),
+        text("INSERT INTO note_embeddings (note_id, embedding, model_version) VALUES (:i, CAST(:e AS vector), :m) ON CONFLICT (note_id) DO UPDATE SET embedding=CAST(:e AS vector), model_version=:m"),
         {"i": nid, "e": str(vec), "m": settings.embedding_model},
     )
 
