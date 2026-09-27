@@ -4,6 +4,7 @@ import { api } from "../../lib/api";
 import type { Note, NoteType } from "../../lib/types";
 import { buildGraph, linksOf } from "../../lib/graph";
 import { createVoice, supported as srSupported } from "../../lib/voice";
+import { createWisprVoice, supported as wisprSupported } from "../../lib/voice-wispr";
 import NoteInput from "../../components/NoteInput";
 import NoteList from "../../components/NoteList";
 import FilterChips from "../../components/FilterChips";
@@ -24,15 +25,103 @@ export default function Notes() {
   const [remote, setRemote] = useState<Note[] | null>(null); // backend /search rows; null = local filter
   const [summary, setSummary] = useState("");
   const voice = useRef<{ stop: () => void } | null>(null);
+  const rec = useRef<MediaRecorder | null>(null);
+  const recBase = useRef("");
+  const recChunks = useRef<Blob[]>([]);
+  const tier = useRef<null | "wispr" | "whisper" | "browser">(null);
 
   const stopVoice = () => {
     try { voice.current?.stop(); } catch { /* already stopped */ }
     voice.current = null;
-    setListening(false);
+    if (!rec.current) setListening(false);
   };
 
-  const toggleSpeak = () => {
-    if (listening) { stopVoice(); return; }
+  // Stop the upload-recorder; commit=true transcribes audio into the (editable) draft.
+  const stopRecorder = (commit: boolean) => {
+    const mr = rec.current;
+    rec.current = null;
+    if (!mr) return;
+    mr.onstop = () => {
+      try { mr.stream.getTracks().forEach(t => t.stop()); } catch { /* noop */ }
+      if (!commit) { setListening(false); return; }
+      const blob = new Blob(recChunks.current, { type: mr.mimeType || "audio/webm" });
+      recChunks.current = [];
+      setListening(false);
+      if (!blob.size) return;
+      const fd = new FormData();
+      fd.append("audio", blob, "note.webm");
+      api("/voice/transcribe", { method: "POST", body: fd }).then(
+        r => {
+          if (r?.transcript) {
+            const t = r.transcript.trim();
+            setText(recBase.current ? `${recBase.current} ${t}`.trim() : t);
+            setNotice("Transcript ready — review it and hit Save.");
+          } else if (r?.error === "not_configured") setNotice("Voice upload isn't configured (no API key).");
+        },
+        () => setNotice("Transcribe failed — check connection and try again."),
+      );
+    };
+    try { mr.stop(); } catch { setListening(false); }
+  };
+
+  const toggleSpeak = async () => {
+    if (listening) { stopVoice(); stopRecorder(true); return; }
+    if (!tier.current) {
+      try {
+        const st = await api("/voice/status");
+        tier.current = st?.wispr ? "wispr" : st?.openai ? "whisper" : "browser";
+      } catch { tier.current = "browser"; }
+    }
+    if (tier.current === "wispr") return startWispr();
+    if (tier.current === "whisper") return startUpload();
+    return startBrowser();
+  };
+
+  const startWispr = async () => {
+    if (!wisprSupported()) { tier.current = "browser"; return startBrowser(); }
+    setNotice("");
+    let tok: { access_token?: string; ws_url?: string };
+    try { tok = await api("/voice/token", { method: "POST", body: "{}" }); }
+    catch { tier.current = "whisper"; return startUpload(); }
+    if (!tok?.access_token) { tier.current = "whisper"; return startUpload(); }
+    const v = createWisprVoice({
+      token: tok.access_token, wsUrl: tok.ws_url || "",
+      base: text,
+      onText: setText,
+      onError: code => {
+        voice.current = null; setListening(false);
+        if (code === "not-allowed") setNotice("Microphone blocked. Allow mic access in site settings, then try again.");
+        else if (code === "audio-capture") setNotice("No microphone found. Check it's plugged in.");
+        else setNotice("Streaming voice hit an error — falling back to typing.");
+        tier.current = "browser";
+      },
+      onEnd: () => { voice.current = null; setListening(false); },
+    });
+    voice.current = v;
+    v.start();
+    setListening(true);
+  };
+
+  const startUpload = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      tier.current = "browser"; return startBrowser();
+    }
+    setNotice("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recBase.current = text;
+      recChunks.current = [];
+      const mr = new MediaRecorder(stream);
+      mr.ondataavailable = e => { if (e.data.size) recChunks.current.push(e.data); };
+      rec.current = mr;
+      mr.start();
+      setListening(true);
+    } catch {
+      setNotice("Microphone blocked. Allow mic access in site settings, then try again.");
+    }
+  };
+
+  const startBrowser = () => {
     if (!srSupported()) { setNotice("This browser has no speech recognition — try Chrome, or type instead."); return; }
     if (!window.isSecureContext) { setNotice("Dictation is blocked on insecure origins — open this page via localhost or HTTPS."); return; }
     setNotice("");
@@ -93,6 +182,7 @@ export default function Notes() {
 
   const save = async () => {
     if (!text.trim() || busy) return;
+    if (rec.current) { stopRecorder(true); return; } // let the transcript land first, save after
     if (listening) stopVoice();
     setBusy(true);
     setNotice("");
