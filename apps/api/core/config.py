@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     extraction_model: str = "gpt-4o-mini"
     summarization_model: str = "gpt-4o-mini"
+    app_user_email: str = ""
+    app_user_password: str = ""
 
     class Config:
         env_file = ".env"
