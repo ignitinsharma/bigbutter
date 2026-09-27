@@ -152,6 +152,25 @@ export default function Notes() {
       .finally(() => setLoading(false));
   }, []);
   const graph = useMemo(() => buildGraph(notes), [notes]);
+  // B6.2: prefer server /map, fall back to the local graph offline/on error.
+  const [serverGraph, setServerGraph] = useState<{ nodes: typeof graph.nodes; links: typeof graph.links } | null>(null);
+  useEffect(() => {
+    let live = true;
+    api("/map").then(
+      r => {
+        if (!live || !Array.isArray(r?.nodes)) return;
+        setServerGraph({
+          nodes: r.nodes.map((n: { id: string; title: string; type: NoteType; summary: string; deg: number; r: number }) => ({
+            id: n.id, note: { id: n.id, raw_text: "", title: n.title, type: n.type, summary: n.summary }, deg: n.deg, r: n.r,
+          })),
+          links: Array.isArray(r.edges) ? r.edges : [],
+        });
+      },
+      () => { if (live) setServerGraph(null); },
+    );
+    return () => { live = false; };
+  }, [notes]);
+  const gmap = serverGraph ?? graph;
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     notes.forEach(n => { const t = n.type || "note"; c[t] = (c[t] || 0) + 1; });
@@ -201,7 +220,7 @@ export default function Notes() {
         <header className="flex items-end justify-between gap-4 flex-wrap mb-5">
           <div>
             <h1 className="font-serif text-3xl">Everything you said</h1>
-            <p className="text-[13px] text-muted mt-1">{notes.length} notes · {graph.links.length} connections</p>
+            <p className="text-[13px] text-muted mt-1">{notes.length} notes · {gmap.links.length} connections</p>
           </div>
         </header>
 
@@ -247,10 +266,10 @@ export default function Notes() {
               ) : (
                 <>
                   <GraphView
-                    nodes={graph.nodes.map(n => ({ id: n.id, title: n.note.title || n.note.raw_text.slice(0, 24), type: (n.note.type || "note") as NoteType, deg: n.deg, r: n.r }))}
-                    links={graph.links} sel={sel} onSelect={setSel} focusIds={matched} />
+                    nodes={gmap.nodes.map(n => ({ id: n.id, title: n.note.title || n.note.raw_text.slice(0, 24), type: (n.note.type || "note") as NoteType, deg: n.deg, r: n.r }))}
+                    links={gmap.links} sel={sel} onSelect={setSel} focusIds={matched} />
                   <p className="text-xs text-muted mt-2">
-                    {graph.nodes.filter(n => n.deg > 0).length} of {graph.nodes.length} notes connected · {graph.links.length} links · drag to rearrange, tap to trace
+                    {gmap.nodes.filter(n => n.deg > 0).length} of {gmap.nodes.length} notes connected · {gmap.links.length} links · drag to rearrange, tap to trace
                   </p>
                   {(() => {
                     const s = notes.find(n => n.id === sel);

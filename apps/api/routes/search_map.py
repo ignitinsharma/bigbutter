@@ -46,5 +46,25 @@ async def search(q: str, resp: Response, uid: str = Depends(me), s: AsyncSession
     return {"query": q, "notes": notes, "matched_ids": ordered, "summary": summary}
 
 @router.get("/map")
-async def mmap(uid: str = Depends(me)):
-    return {"nodes": [], "edges": []}  # B6
+async def mmap(uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
+    rows = (await s.execute(
+        text("SELECT id, title, type, summary, tags, people FROM notes WHERE user_id=:u"),
+        {"u": uid},
+    )).mappings().all()
+    notes = [{"id": str(r["id"]), "title": r["title"] or "", "type": r["type"] or "note",
+              "summary": r["summary"] or "", "tags": [str(t).lower() for t in (r["tags"] or [])],
+              "people": [str(p).lower() for p in (r["people"] or [])]} for r in rows]
+    links = []
+    for i in range(len(notes)):
+        for j in range(i + 1, len(notes)):
+            a, b = notes[i], notes[j]
+            shared = sorted(set(a["tags"]) & set(b["tags"]) | set(a["people"]) & set(b["people"]))
+            if shared:
+                links.append({"source": a["id"], "target": b["id"], "shared": shared, "weight": len(shared)})
+    deg: dict[str, int] = {}
+    for l in links:
+        deg[l["source"]] = deg.get(l["source"], 0) + 1
+        deg[l["target"]] = deg.get(l["target"], 0) + 1
+    nodes = [{"id": n["id"], "title": n["title"], "type": n["type"], "summary": n["summary"],
+              "deg": deg.get(n["id"], 0), "r": 8 + min(10, deg.get(n["id"], 0) * 2)} for n in notes]
+    return {"nodes": nodes, "edges": links}
