@@ -11,7 +11,7 @@ router = APIRouter(prefix="/voice")
 @router.get("/status")
 async def status(uid: str = Depends(me)):
     return {"openai": bool(settings.openai_api_key), "wispr": bool(settings.wispr_api_key),
-            "transcribe": settings.transcribe_engine}
+            "transcribe": settings.transcribe_engine, "embed": settings.embed_engine}
 
 @router.post("/transcribe")
 async def transcribe_audio(resp: Response, audio: UploadFile = File(...), uid: str = Depends(me)):

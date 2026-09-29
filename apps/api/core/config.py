@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     extraction_model: str = "gpt-4o-mini"
     summarization_model: str = "gpt-4o-mini"
     transcribe_engine: str = "api"  # or "local" (on-device tiny model, no key)
+    embed_engine: str = "api"  # or "local" (on-device MiniLM 384-dim, no key)
     app_user_email: str = ""
     app_user_password: str = ""
 

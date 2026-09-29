@@ -3,7 +3,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.session import get_session
 from routes.notes import me
+from core.config import settings
 from core.openai_client import embed, summarize, NotConfigured
+from core.local_embed import embed_local
 
 router = APIRouter()
 
@@ -18,13 +20,22 @@ def _rrf(rank_lists: list[list[str]], k: int = 60) -> list[str]:
 
 @router.get("/search")
 async def search(q: str, resp: Response, uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
-    try:
-        qv = str(await embed(q))
-    except NotConfigured:
-        resp.status_code = 501
-        return {"error": "not_configured"}
+    if settings.embed_engine == "local":
+        try:
+            qv = str(embed_local(q))
+        except RuntimeError:
+            resp.status_code = 501
+            return {"error": "not_configured"}
+        emb_table = "note_embeddings_local"
+    else:
+        try:
+            qv = str(await embed(q))
+        except NotConfigured:
+            resp.status_code = 501
+            return {"error": "not_configured"}
+        emb_table = "note_embeddings"
     sem = (await s.execute(
-        text(f"SELECT {NOTE_COLS} FROM note_embeddings e JOIN notes n ON n.id = e.note_id "
+        text(f"SELECT {NOTE_COLS} FROM {emb_table} e JOIN notes n ON n.id = e.note_id "
              "WHERE n.user_id=:u ORDER BY e.embedding <=> CAST(:qv AS vector) LIMIT 20"),
         {"u": uid, "qv": qv},
     )).mappings().all()
@@ -42,7 +53,10 @@ async def search(q: str, resp: Response, uid: str = Depends(me), s: AsyncSession
     try:
         summary = await summarize(q, notes[:8])
     except NotConfigured:
-        summary = ""
+        # ponytail: extractive fallback — no generative model, just the hits.
+        titles = [n.get("title") or (n.get("raw_text") or "")[:60] for n in notes[:3]]
+        summary = f"{len(notes)} matching note{'s' if len(notes) != 1 else ''} for '{q}'" + (
+            ": " + "; ".join(t for t in titles if t) if titles else "")
     return {"query": q, "notes": notes, "matched_ids": ordered, "summary": summary}
 
 @router.get("/map")
