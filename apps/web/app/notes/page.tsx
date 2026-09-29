@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import type { Note, NoteType } from "../../lib/types";
+import { TYPES } from "../../lib/types";
 import { buildGraph, linksOf } from "../../lib/graph";
 import { createVoice, supported as srSupported } from "../../lib/voice";
 import { createWisprVoice, supported as wisprSupported } from "../../lib/voice-wispr";
@@ -19,6 +20,7 @@ export default function Notes() {
   const [listening, setListening] = useState(false); // wired to SpeechRecognition in F3
   const [view, setView] = useState<"stream" | "map">("stream");
   const [sel, setSel] = useState<string | null>(null);
+  const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | NoteType>("all");
   const [notice, setNotice] = useState("");
@@ -264,10 +266,25 @@ export default function Notes() {
                   <p className="text-sm text-muted mt-2">Save a note first — the map draws itself from shared tags and people.</p>
                 </div>
               ) : (
-                <>
+                <div className="relative">
                   <GraphView
                     nodes={gmap.nodes.map(n => ({ id: n.id, title: n.note.title || n.note.raw_text.slice(0, 24), type: (n.note.type || "note") as NoteType, deg: n.deg, r: n.r }))}
-                    links={gmap.links} sel={sel} onSelect={setSel} focusIds={matched} />
+                    links={gmap.links} sel={sel} onSelect={setSel} focusIds={matched}
+                    onHover={(id, x, y) => setHover(id ? { id, x, y } : null)} />
+                  {(() => {
+                    const h = hover && notes.find(n => n.id === hover.id);
+                    if (!h) return null;
+                    const t = TYPES[h.type || "note"] || TYPES.note;
+                    return (
+                      <div className="anim-enter absolute z-10 w-60 max-w-[240px] rounded bg-card border border-line p-3 pointer-events-none shadow-lg"
+                        style={{ left: Math.min(Math.max(hover.x - 120, 4), 400), top: Math.max(hover.y - 110, 4) }}>
+                        <span className="inline-block text-[11px] font-medium px-1.5 py-0.5 rounded mb-1"
+                          style={{ color: t.hue, background: t.bg }}>{t.label}</span>
+                        <h2 className="font-serif text-[15px] leading-snug">{h.title || h.raw_text.slice(0, 60)}</h2>
+                        {h.summary && <p className="text-xs text-soft mt-1 line-clamp-2">{h.summary}</p>}
+                      </div>
+                    );
+                  })()}
                   <p className="text-xs text-muted mt-2">
                     {gmap.nodes.filter(n => n.deg > 0).length} of {gmap.nodes.length} notes connected · {gmap.links.length} links · drag to rearrange, tap to trace
                   </p>
@@ -293,7 +310,7 @@ export default function Notes() {
                       </div>
                     );
                   })()}
-                </>
+                </div>
               )
             ) : loading ? (
               <div className="flex flex-col gap-3">{[0, 1, 2].map(i => <div key={i} className="skeleton h-24 rounded" />)}</div>

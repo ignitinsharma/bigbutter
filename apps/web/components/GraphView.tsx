@@ -29,14 +29,17 @@ type Props = {
   sel: string | null;
   onSelect: (id: string | null) => void;
   focusIds?: string[] | null;
+  onHover?: (id: string | null, x: number, y: number) => void;
 };
 
-export default function GraphView({ nodes, links, sel, onSelect, focusIds }: Props) {
+export default function GraphView({ nodes, links, sel, onSelect, focusIds, onHover }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const selRef = useRef(sel);
   selRef.current = sel;
   const cbRef = useRef(onSelect);
   cbRef.current = onSelect;
+  const hoverRef = useRef(onHover);
+  hoverRef.current = onHover;
 
   useEffect(() => {
     const el = host.current;
@@ -79,10 +82,16 @@ export default function GraphView({ nodes, links, sel, onSelect, focusIds }: Pro
       .style("pointer-events", "none").style("font-family", "Inter,sans-serif")
       .text(d => d.shared.slice(0, 2).join(" · ")).attr("opacity", 0);
 
+    const rel = (ev: { clientX: number; clientY: number }) => {
+      const box = el.getBoundingClientRect();
+      return { x: ev.clientX - box.left, y: ev.clientY - box.top };
+    };
+
     const nodeG = nodeLayer.selectAll("g").data(simNodes).join("g").style("cursor", "grab")
       .on("click", (ev, d) => { ev.stopPropagation(); cbRef.current(selRef.current === d.id ? null : d.id); })
-      .on("pointerenter", (_ev, d) => highlight(d.id))
-      .on("pointerleave", () => highlight(selRef.current))
+      .on("pointerenter", (ev, d) => { highlight(d.id); const p = rel(ev); hoverRef.current?.(d.id, p.x, p.y); })
+      .on("pointermove", (ev, d) => { const p = rel(ev); hoverRef.current?.(d.id, p.x, p.y); })
+      .on("pointerleave", () => { highlight(selRef.current); hoverRef.current?.(null, 0, 0); })
       .call(drag<SVGGElement, GNode>()
         .on("start", (ev, d) => { sim.alphaTarget(0.25).restart(); d.fx = d.x; d.fy = d.y; })
         .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
