@@ -208,6 +208,12 @@ export default function Notes() {
     return () => { live = false; clearTimeout(t); };
   }, [query]);
 
+  const logout = async () => {
+    stopVoice(); stopRecorder(false);
+    try { await api("/auth/logout", { method: "POST", body: "{}" }); }
+    finally { router.push("/login"); }
+  };
+
   const save = async () => {
     if (!text.trim() || busy) return;
     if (rec.current) { stopRecorder(true); return; } // let the transcript land first, save after
@@ -231,6 +237,10 @@ export default function Notes() {
             <h1 className="font-serif text-3xl">Everything you said</h1>
             <p className="text-[13px] text-muted mt-1">{notes.length} notes · {gmap.links.length} connections</p>
           </div>
+          <button onClick={logout}
+            className="btn-press rounded text-[13px] font-medium px-4 py-2 bg-white text-ink border border-line self-start">
+            Log out
+          </button>
         </header>
 
         {notice && <Notice text={notice} onDismiss={() => setNotice("")} />}
