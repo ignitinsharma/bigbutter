@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "../../lib/api";
 import type { Note, NoteType } from "../../lib/types";
 import { TYPES } from "../../lib/types";
@@ -13,6 +14,7 @@ import GraphView from "../../components/GraphView";
 import Notice from "../../components/Notice";
 
 export default function Notes() {
+  const router = useRouter();
   const [notes, setNotes] = useState<Note[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -150,8 +152,13 @@ export default function Notes() {
   useEffect(() => {
     api("/notes")
       .then(r => setNotes(Array.isArray(r) ? r : []))
-      .catch(() => setNotice("Could not reach the API — showing an empty desk. Start the backend and reload."))
+      .catch((e: { status?: number }) => {
+        // Stale/forged cookie sailed past the edge check — bounce to login.
+        if (e?.status === 401) router.push("/login?next=/notes");
+        else setNotice("Could not reach the API — showing an empty desk. Start the backend and reload.");
+      })
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const graph = useMemo(() => buildGraph(notes), [notes]);
   // B6.2: prefer server /map, fall back to the local graph offline/on error.

@@ -14,14 +14,15 @@ from routes.search_map import router as misc_r
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.app_user_email and settings.app_user_password:
+        email = settings.app_user_email.strip().lower()
         async with Session() as s:
             await s.execute(
                 text("INSERT INTO users (email, password_hash) VALUES (:e,:h) "
                      "ON CONFLICT (email) DO UPDATE SET password_hash=:h"),
-                {"e": settings.app_user_email, "h": hash_password(settings.app_user_password)},
+                {"e": email, "h": hash_password(settings.app_user_password)},
             )
             await s.commit()
-        print(f"env user ensured: {settings.app_user_email}")
+        print(f"env user ensured: {email}")
     yield
 
 app = FastAPI(title="bigbutter api", lifespan=lifespan)

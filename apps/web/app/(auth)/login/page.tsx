@@ -1,20 +1,38 @@
 "use client";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "../../../lib/api";
 
 export default function Login() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function safeNext(v: string | null): string {
+  // Allow only same-origin absolute paths (blocks open redirects).
+  if (v && v.startsWith("/") && !v.startsWith("//")) return v;
+  return "/notes";
+}
+
+function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const next = safeNext(useSearchParams().get("next"));
   const go = async () => {
     setBusy(true); setErr("");
     try {
-      const r = await api("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
-      if (r?.error) setErr("Invalid email or password.");
-      else location.href = "/notes";
-    } catch { setErr("Could not reach the server. Is the API running?"); }
-    finally { setBusy(false); }
+      await api("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      location.href = next;
+    } catch (e: unknown) {
+      setErr((e as { status?: number })?.status === 401
+        ? "Invalid email or password."
+        : "Could not reach the server. Is the API running?");
+    } finally { setBusy(false); }
   };
   return (
     <main className="min-h-screen bg-paper flex items-center justify-center px-5">

@@ -13,7 +13,7 @@ class LoginIn(BaseModel):
 
 @router.post("/login")
 async def login(body: LoginIn, resp: Response, s: AsyncSession = Depends(get_session)):
-    row = (await s.execute(text("SELECT id, password_hash FROM users WHERE email=:e"), {"e": body.email})).mappings().first()
+    row = (await s.execute(text("SELECT id, password_hash FROM users WHERE lower(email)=lower(:e)"), {"e": body.email})).mappings().first()
     if not row or not verify_password(body.password, row["password_hash"]):
         resp.status_code = 401
         return {"error": "bad credentials"}

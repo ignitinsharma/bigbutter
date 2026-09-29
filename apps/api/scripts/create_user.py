@@ -7,6 +7,7 @@ from core.auth import hash_password
 from db.session import Session
 
 async def main(email: str, pw: str):
+    email = email.strip().lower()
     async with Session() as s:
         await s.execute(
             text("INSERT INTO users (email, password_hash) VALUES (:e, :h) ON CONFLICT (email) DO NOTHING"),
