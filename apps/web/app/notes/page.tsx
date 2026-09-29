@@ -69,7 +69,7 @@ export default function Notes() {
     if (!tier.current) {
       try {
         const st = await api("/voice/status");
-        tier.current = st?.wispr ? "wispr" : st?.openai ? "whisper" : "browser";
+        tier.current = st?.wispr ? "wispr" : (st?.openai || st?.transcribe === "local") ? "whisper" : "browser";
       } catch { tier.current = "browser"; }
     }
     if (tier.current === "wispr") return startWispr();
