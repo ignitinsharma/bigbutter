@@ -10,10 +10,21 @@ router = APIRouter(prefix="/voice")
 
 @router.get("/status")
 async def status(uid: str = Depends(me)):
-    return {"openai": bool(settings.openai_api_key), "wispr": bool(settings.wispr_api_key)}
+    return {"openai": bool(settings.openai_api_key), "wispr": bool(settings.wispr_api_key),
+            "transcribe": settings.transcribe_engine}
 
 @router.post("/transcribe")
 async def transcribe_audio(resp: Response, audio: UploadFile = File(...), uid: str = Depends(me)):
+    if settings.transcribe_engine == "local":
+        from core.local_whisper import transcribe_local
+        suffix = os.path.splitext(audio.filename or "audio")[1] or ".webm"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(await audio.read())
+            path = tmp.name
+        try:
+            return {"transcript": transcribe_local(path), "engine": "local"}
+        finally:
+            os.unlink(path)
     if not settings.openai_api_key:
         resp.status_code = 501
         return {"error": "not_configured"}

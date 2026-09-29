@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     extraction_model: str = "gpt-4o-mini"
     summarization_model: str = "gpt-4o-mini"
+    transcribe_engine: str = "api"  # or "local" (on-device tiny model, no key)
     app_user_email: str = ""
     app_user_password: str = ""
 
