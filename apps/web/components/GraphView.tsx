@@ -55,6 +55,7 @@ export default function GraphView({ nodes, links, sel, onSelect, focusIds, onHov
 
     const svg = el.querySelector("svg")!;
     svg.onclick = () => cbRef.current(null);
+    svg.onmouseleave = () => hoverRef.current?.(null, 0, 0);
 
     const simNodes: GNode[] = nodes.map(n => {
       const p = pos[n.id];
@@ -89,11 +90,11 @@ export default function GraphView({ nodes, links, sel, onSelect, focusIds, onHov
 
     const nodeG = nodeLayer.selectAll("g").data(simNodes).join("g").style("cursor", "grab")
       .on("click", (ev, d) => { ev.stopPropagation(); cbRef.current(selRef.current === d.id ? null : d.id); })
-      .on("pointerenter", (ev, d) => { highlight(d.id); const p = rel(ev); hoverRef.current?.(d.id, p.x, p.y); })
+      .on("pointerenter", (ev, d) => { d.fx = d.x; d.fy = d.y; highlight(d.id); const p = rel(ev); hoverRef.current?.(d.id, p.x, p.y); })
       .on("pointermove", (ev, d) => { const p = rel(ev); hoverRef.current?.(d.id, p.x, p.y); })
-      .on("pointerleave", () => { highlight(selRef.current); hoverRef.current?.(null, 0, 0); })
+      .on("pointerleave", (_ev, d) => { d.fx = null; d.fy = null; sim.alpha(0.25).restart(); highlight(selRef.current); hoverRef.current?.(null, 0, 0); })
       .call(drag<SVGGElement, GNode>()
-        .on("start", (ev, d) => { sim.alphaTarget(0.25).restart(); d.fx = d.x; d.fy = d.y; })
+        .on("start", (ev, d) => { hoverRef.current?.(null, 0, 0); sim.alphaTarget(0.25).restart(); d.fx = d.x; d.fy = d.y; })
         .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
         .on("end", (ev, d) => { sim.alphaTarget(0); d.fx = null; d.fy = null; }));
 
