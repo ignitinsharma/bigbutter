@@ -19,11 +19,13 @@ type SRResultEvent = {
 
 type SRCtor = new () => SRInstance;
 
+// True when the browser has built-in speech recognition (Chrome/Safari, secure origin).
 export function supported(): boolean {
   const w = window as unknown as Record<string, unknown>;
   return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
 }
 
+// Dictate into the draft via the browser engine; merges interim + final transcripts.
 export function createVoice(opts: {
   base: string;
   onText: (v: string) => void;

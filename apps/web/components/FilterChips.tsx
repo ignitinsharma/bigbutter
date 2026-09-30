@@ -1,6 +1,6 @@
 "use client";
 
-import { TYPES, type NoteType } from "../lib/types";
+import { TYPES, tint, type NoteType } from "../lib/types";
 
 type Props = {
   counts: Record<string, number>;
@@ -11,20 +11,27 @@ type Props = {
 
 export default function FilterChips({ counts, total, active, onPick }: Props) {
   const kinds = (Object.keys(counts) as NoteType[]).filter(k => counts[k] > 0);
+  const base = "chip-lift btn-press shrink-0 inline-flex items-center gap-1.5 text-[13px] font-medium h-8 pl-3 pr-1.5 rounded-full border";
+  const badge = "tabular-nums text-[11px] min-w-5 h-5 px-1.5 rounded-full inline-flex items-center justify-center";
   return (
-    <div className="flex flex-wrap gap-1.5">
-      <button onClick={() => onPick("all")}
-        className="chip-lift text-xs font-medium px-2.5 py-1.5 rounded"
-        style={active === "all" ? { background: "#241C33", color: "#FAF9F6" } : { background: "#E5E1D6", color: "#241C33" }}>
-        All {total}
+    <div className="no-scrollbar flex gap-2 overflow-x-auto min-w-0 py-0.5" role="group" aria-label="Filter by type">
+      <button onClick={() => onPick("all")} aria-pressed={active === "all"}
+        className={`${base} pr-3 ${active === "all" ? "bg-primary-100 border-primary-100 text-primary" : "bg-bg border-line text-soft hover:border-line-strong"}`}>
+        All ({total})
       </button>
-      {kinds.map(k => (
-        <button key={k} onClick={() => onPick(k)}
-          className="chip-lift text-xs font-medium px-2.5 py-1.5 rounded"
-          style={active === k ? { background: TYPES[k].hue, color: "#FAF9F6" } : { background: TYPES[k].bg, color: TYPES[k].hue }}>
-          {TYPES[k].label} {counts[k]}
-        </button>
-      ))}
+      {kinds.map(k => {
+        const on = active === k;
+        const t = TYPES[k];
+        return (
+          <button key={k} onClick={() => onPick(k)} aria-pressed={on}
+            className={`${base} ${on ? "" : "bg-bg border-line text-soft hover:border-line-strong"}`}
+            style={on ? { background: tint(t.hue), borderColor: t.hue, color: t.hue } : undefined}>
+            <span className="w-2 h-2 rounded-full" style={{ background: t.hue }} aria-hidden />
+            {t.label}
+            <span className={`${badge} ${on ? "" : "bg-surface text-muted"}`} style={on ? { background: tint(t.hue, 22) } : undefined}>{counts[k]}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

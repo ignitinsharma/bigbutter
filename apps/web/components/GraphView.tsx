@@ -29,10 +29,11 @@ type Props = {
   sel: string | null;
   onSelect: (id: string | null) => void;
   focusIds?: string[] | null;
+  fit?: boolean; // search subgraph: zoom the viewBox onto the nodes once the layout settles
   onHover?: (id: string | null, x: number, y: number) => void;
 };
 
-export default function GraphView({ nodes, links, sel, onSelect, focusIds, onHover }: Props) {
+export default function GraphView({ nodes, links, sel, onSelect, focusIds, fit, onHover }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const selRef = useRef(sel);
   selRef.current = sel;
@@ -49,8 +50,8 @@ export default function GraphView({ nodes, links, sel, onSelect, focusIds, onHov
     el.innerHTML =
       `<svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}">` +
       `<defs><pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse">` +
-      `<circle cx="1" cy="1" r="0.7" fill="#DCD7CA"/></pattern></defs>` +
-      `<rect width="${w}" height="${h}" fill="url(#grid)"/>` +
+      `<circle cx="1" cy="1" r="0.7" style="fill:var(--line-strong)"/></pattern></defs>` +
+      `<rect x="${-w * 3}" y="${-h * 3}" width="${w * 7}" height="${h * 7}" fill="url(#grid)"/>` +
       `<g id="edges"></g><g id="nodes"></g></svg>`;
 
     const svg = el.querySelector("svg")!;
@@ -76,11 +77,11 @@ export default function GraphView({ nodes, links, sel, onSelect, focusIds, onHov
     const nodeLayer = select(svg).select("#nodes");
 
     const edgeSel = edges.selectAll("line").data(simLinks).join("line")
-      .attr("stroke", "#B3AB98").attr("stroke-width", d => Math.min(4, d.weight * 1.3));
+      .style("stroke", "var(--line-strong)").attr("stroke-width", d => Math.min(4, d.weight * 1.3));
 
     const labelSel = edges.selectAll("text").data(simLinks).join("text")
-      .attr("font-size", 10.5).attr("fill", "#8A5A00").attr("text-anchor", "middle")
-      .style("pointer-events", "none").style("font-family", "Inter,sans-serif")
+      .attr("font-size", 10.5).style("fill", "var(--primary)").attr("text-anchor", "middle")
+      .style("pointer-events", "none").style("font-family", "Geist,sans-serif")
       .text(d => d.shared.slice(0, 2).join(" · ")).attr("opacity", 0);
 
     const rel = (ev: { clientX: number; clientY: number }) => {
@@ -100,12 +101,12 @@ export default function GraphView({ nodes, links, sel, onSelect, focusIds, onHov
 
     nodeG.append("circle")
       .attr("r", d => d.r)
-      .attr("fill", d => (d.deg ? TYPES[d.type].hue : TYPES[d.type].bg))
+      .style("fill", d => (d.deg ? TYPES[d.type].hue : `color-mix(in srgb, ${TYPES[d.type].hue} 16%, var(--bg))`))
       .attr("stroke", d => TYPES[d.type].hue).attr("stroke-width", 1.5);
 
     nodeG.append("text")
-      .attr("text-anchor", "middle").attr("font-size", 11.5).attr("fill", "#413B31")
-      .style("pointer-events", "none").style("font-family", "Inter,sans-serif")
+      .attr("text-anchor", "middle").attr("font-size", 11.5).style("fill", "var(--soft)")
+      .style("pointer-events", "none").style("font-family", "Geist,sans-serif")
       .attr("dy", d => d.r + 14)
       .text(d => (d.title.length > 24 ? d.title.slice(0, 23) + "…" : d.title));
 
@@ -145,6 +146,21 @@ export default function GraphView({ nodes, links, sel, onSelect, focusIds, onHov
       nodeG.attr("transform", d => `translate(${d.x},${d.y})`);
     });
 
+    if (fit) {
+      let done = false;
+      sim.on("end.fit", () => {
+        if (done) return;
+        done = true;
+        const pad = 60;
+        const x0 = Math.min(...simNodes.map(d => d.x! - d.r)) - pad, x1 = Math.max(...simNodes.map(d => d.x! + d.r)) + pad;
+        const y0 = Math.min(...simNodes.map(d => d.y! - d.r)) - pad, y1 = Math.max(...simNodes.map(d => d.y! + d.r + 16)) + pad;
+        // never zoom in past 1.6× (a lone node shouldn't fill the canvas); keep the canvas aspect
+        const s = Math.max((x1 - x0) / w, (y1 - y0) / h, 1 / 1.6);
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        svg.setAttribute("viewBox", `${cx - (w * s) / 2} ${cy - (h * s) / 2} ${w * s} ${h * s}`);
+      });
+    }
+
     if (selRef.current) highlight(selRef.current);
     else if (focusIds && focusIds.length) {
       const keep = new Set(focusIds);
@@ -152,7 +168,7 @@ export default function GraphView({ nodes, links, sel, onSelect, focusIds, onHov
     }
     return () => { sim.stop(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, links, JSON.stringify(focusIds)]);
+  }, [nodes, links, fit, JSON.stringify(focusIds)]);
 
   // re-highlight when selection changes without rebuilding the sim
   useEffect(() => {
@@ -162,5 +178,5 @@ export default function GraphView({ nodes, links, sel, onSelect, focusIds, onHov
     if (!sel) { svg.select("#nodes").selectAll("g").attr("opacity", 1); svg.select("#edges").selectAll("line").attr("opacity", 1); svg.select("#edges").selectAll("text").attr("opacity", 0); }
   }, [sel]);
 
-  return <div id="map" ref={host} className="rounded bg-card border border-line overflow-hidden" style={{ touchAction: "none" }} />;
+  return <div id="map" ref={host} className="card bg-surface overflow-hidden" style={{ touchAction: "none" }} />;
 }

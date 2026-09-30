@@ -5,6 +5,7 @@ class WisprCapture extends AudioWorkletProcessor {
     this.buffer = [];
     this.target = 800; // ~50ms at 16kHz
   }
+  // Slice mic input into ~50ms Int16 chunks and post them (with volume) to the page.
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
     if (!ch) return true;

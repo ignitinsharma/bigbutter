@@ -1,13 +1,13 @@
 export type NoteType = "idea" | "task" | "note" | "person" | "link" | "expense" | "journal";
 
 export const TYPES: Record<NoteType, { label: string; hue: string; bg: string }> = {
-  idea: { label: "Idea", hue: "#8A5A00", bg: "#F6EBD2" },
-  task: { label: "Task", hue: "#5B3A7E", bg: "#EDE4F5" },
-  note: { label: "Note", hue: "#3F4B5B", bg: "#E3E8EE" },
-  person: { label: "Person", hue: "#3F6B4A", bg: "#E0EDE2" },
-  link: { label: "Link", hue: "#1F5E77", bg: "#DDEDF3" },
-  expense: { label: "Expense", hue: "#8C4426", bg: "#F7E4DA" },
-  journal: { label: "Journal", hue: "#8A3C56", bg: "#F7E1E8" },
+  idea: { label: "Idea", hue: "#B26B00", bg: "#FFF4E0" },
+  task: { label: "Task", hue: "#1F7A8C", bg: "#E4F4F7" },
+  note: { label: "Note", hue: "#4B5565", bg: "#EEF0F4" },
+  person: { label: "Person", hue: "#2F8A57", bg: "#E5F5EC" },
+  link: { label: "Link", hue: "#2C6FD1", bg: "#E7F0FD" },
+  expense: { label: "Expense", hue: "#C2462E", bg: "#FDECE8" },
+  journal: { label: "Journal", hue: "#C23A78", bg: "#FCE9F2" },
 };
 
 export type Note = {
@@ -19,5 +19,19 @@ export type Note = {
   tags?: string[];
   people?: string[];
   action_items?: string[];
+  category?: string;
+  keywords?: string[];
   created_at?: string;
+  related?: Related[]; // linked notes across all pages, computed server-side
 };
+
+export type Related = { id: string; title: string; shared: string[] };
+
+// GET /notes?page&per&sort&type
+export type NotesPage = { items: Note[]; total: number; page: number; per: number; pages: number };
+
+// GET /notes/stats
+export type NoteStats = { total: number; counts: Record<string, number>; connections: number };
+
+// Pill tint derived from the hue so it reads in both themes.
+export const tint = (hue: string, pct = 14) => `color-mix(in srgb, ${hue} ${pct}%, transparent)`;

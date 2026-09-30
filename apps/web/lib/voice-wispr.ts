@@ -10,6 +10,7 @@ export type WisprOpts = {
   onEnd: () => void;
 };
 
+// Encode raw PCM bytes to base64 for the Wispr append protocol.
 function b64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
   let s = "";
@@ -17,12 +18,14 @@ function b64(buf: ArrayBuffer): string {
   return btoa(s);
 }
 
+// True when mic + AudioContext exist for Wispr live streaming.
 export function supported(): boolean {
   return typeof window !== "undefined" &&
     Boolean(navigator.mediaDevices?.getUserMedia) &&
     typeof AudioContext !== "undefined";
 }
 
+// Stream mic audio to Wispr over WS (auth → append → commit); same shape as lib/voice.ts.
 export function createWisprVoice(opts: WisprOpts): { start: () => void; stop: () => void } {
   let ws: WebSocket | null = null;
   let ctx: AudioContext | null = null;
@@ -32,6 +35,7 @@ export function createWisprVoice(opts: WisprOpts): { start: () => void; stop: ()
   let settled = "";
   let stopped = false;
 
+  // Tear down mic, AudioContext, and socket after stop/error.
   const cleanup = () => {
     try { node?.disconnect(); } catch { /* noop */ }
     try { ctx?.close(); } catch { /* noop */ }
@@ -40,11 +44,13 @@ export function createWisprVoice(opts: WisprOpts): { start: () => void; stop: ()
     ws = null; ctx = null; stream = null; node = null;
   };
 
+  // Merge settled + interim speech into the draft (prefixed with prior text).
   const emit = (spoken: string) => {
     const t = (settled + " " + spoken).trim();
     opts.onText(opts.base ? `${opts.base} ${t}`.trim() : t);
   };
 
+  // Open mic + WS, auth with the short-lived token, pipe 16kHz chunks to Wispr.
   const start = async () => {
     stopped = false;
     position = 0;
@@ -95,6 +101,7 @@ export function createWisprVoice(opts: WisprOpts): { start: () => void; stop: ()
     }
   };
 
+  // Commit the stream (final transcript) then clean up and signal the end.
   const stop = () => {
     stopped = true;
     try {

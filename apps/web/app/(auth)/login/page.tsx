@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { api } from "../../../lib/api";
 import Brand from "../../../components/Brand";
 
+// login: Suspense wrapper so useSearchParams(?next=) works in a static route.
 export default function Login() {
   return (
     <Suspense>
@@ -18,6 +19,7 @@ function safeNext(v: string | null): string {
   return "/notes";
 }
 
+// Login form state + submit: POST /auth/login, then go to ?next= or /notes.
 function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,6 +28,7 @@ function LoginForm() {
   const [tries, setTries] = useState(0); // re-keys the error so it shakes on every failure
   const [busy, setBusy] = useState(false);
   const next = safeNext(useSearchParams().get("next"));
+  // Submit credentials; 401 = wrong combo, anything else = API unreachable.
   const go = async () => {
     if (busy || !email || !password) return;
     setBusy(true); setErr("");

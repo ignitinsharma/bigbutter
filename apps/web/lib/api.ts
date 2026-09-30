@@ -1,4 +1,6 @@
+// api: the only way the UI talks to the backend (cookie auth included).
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Fetch JSON from the API with cookies; throws with .status so callers can spot 401s.
 export async function api(path: string, opts: RequestInit = {}) {
   const headers: Record<string, string> = { ...((opts.headers as Record<string, string>) || {}) };
   // Only default to JSON for string bodies — FormData sets its own multipart boundary.

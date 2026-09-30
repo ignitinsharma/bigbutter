@@ -14,7 +14,8 @@ STOP = set(
     "just really very actually honestly like need want think thinking feel today tomorrow yesterday".split()
 )
 
-def local_extract(raw: str, known: Optional[List[str]] = None) -> Dict[str, object]:
+def local_extract(raw: str, known: Optional[List[str]] = None, known_categories: Optional[List[str]] = None) -> Dict[str, object]:
+    # Rule-based fallback: guess type/tags/people/title from regexes when no LLM is reachable.
     known = known or []
     low = raw.lower()
     if re.search(r"\b(need to|should|remind|ask |todo|must |have to|follow up)\b", raw, re.I):
@@ -40,8 +41,13 @@ def local_extract(raw: str, known: Optional[List[str]] = None) -> Dict[str, obje
               if w not in ("I", "The", "So", "And", "But", "We", "My", "This", "That")][:3]
 
     first = re.split(r"[.!?]", raw.strip())[0].strip()
-    title = " ".join(first.split()[:7])
+    words = first.split()[:7]
+    while len(words) > 2 and words[-1].lower().strip(",;:") in STOP:  # no "…groceries at the"
+        words.pop()
+    title = " ".join(words).rstrip(",;:")
     title = title[:1].upper() + title[1:] if title else ""
     summary = first[:1].upper() + first[1:] + ("" if first.endswith(".") else ".") if first else ""
+    category = next((c for c in (known_categories or []) if c and re.search(rf"\b{re.escape(c.lower())}\b", low)), "")
     return {"title": title, "type": typ, "summary": summary, "tags": tags,
-            "people": people, "action_items": [first] if typ == "task" and first else []}
+            "people": people, "action_items": [first] if typ == "task" and first else [],
+            "category": category, "keywords": tags}

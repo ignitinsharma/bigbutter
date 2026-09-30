@@ -1,3 +1,4 @@
+-- 001_init: three tables walk into a bar...
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 

@@ -4,13 +4,16 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        paper: "var(--paper)", card: "var(--card)", line: "var(--line)",
-        ink: "var(--ink)", soft: "var(--soft)", muted: "var(--muted)",
-        faint: "var(--faint)", accent: "var(--accent)",
+        bg: "var(--bg)", surface: "var(--surface)", line: "var(--line)", "line-strong": "var(--line-strong)",
+        ink: "var(--ink)", soft: "var(--soft)", muted: "var(--muted)", faint: "var(--faint)",
+        primary: { DEFAULT: "var(--primary)", 600: "var(--primary-600)", 50: "var(--primary-50)", 100: "var(--primary-100)" },
+        danger: { DEFAULT: "var(--danger)", 50: "var(--danger-50)" },
+        // legacy aliases
+        paper: "var(--paper)", card: "var(--card)", accent: "var(--accent)",
       },
       fontFamily: {
-        serif: ["Newsreader", "Georgia", "serif"],
-        sans: ["Inter", "system-ui", "sans-serif"],
+        display: ["Bricolage Grotesque", "system-ui", "sans-serif"],
+        sans: ["Geist", "system-ui", "sans-serif"],
       },
     },
   },

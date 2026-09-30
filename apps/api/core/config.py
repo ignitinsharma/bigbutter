@@ -1,3 +1,4 @@
+# config: all the secrets.
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -11,6 +12,11 @@ class Settings(BaseSettings):
     summarization_model: str = "gpt-4o-mini"
     transcribe_engine: str = "api"  # or "local" (on-device tiny model, no key)
     embed_engine: str = "api"  # or "local" (on-device MiniLM 384-dim, no key)
+    llm_engine: str = "api"  # "api" (OpenAI key) | "local" (Ollama, no key) | "off" (rule fallback)
+    llm_base_url: str = "http://localhost:11434/v1"
+    llm_model: str = "qwen2.5:1.5b"
+    search_min_sim: float = 0.30  # cosine floor for the semantic leg
+    search_rerank: bool = False
     app_user_email: str = ""
     app_user_password: str = ""
 
