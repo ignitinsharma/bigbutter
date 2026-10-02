@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     llm_model: str = "qwen2.5:1.5b"
     search_min_sim: float = 0.30  # cosine floor for the semantic leg
     search_rerank: bool = False
-    # S3 voice recordings (todo.md §S). Optional: no bucket/keys → audio isn't kept, voice works as before.
+    # S3 voice recordings (core/storage.py). Optional: no bucket/keys → audio isn't kept, voice works as before.
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_region: str = "ap-south-1"

@@ -1,6 +1,6 @@
 """Sweep voice clips never attached to a note (cancelled drafts, crashed uploads).
 
-DB-driven (todo.md §S5): only rows with note_id IS NULL older than N hours are
+DB-driven: only rows with note_id IS NULL older than N hours are
 touched, so audio behind a saved note can never be deleted. S3 object first,
 then the row; deleting a key that never made it to S3 is a no-op.
 

@@ -1,4 +1,4 @@
--- 006: voice clips kept in S3 (todo.md §S); one note can carry several (record → append → record).
+-- 006: voice clips kept in S3 (core/storage.py, routes/voice.py); one note can carry several (record → append → record).
 -- Row is written before the upload so a crash mid-request leaves something the prune job can find.
 -- status: uploading → transcribed | failed → attached (retry moves failed → transcribed).
 

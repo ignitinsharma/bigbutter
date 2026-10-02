@@ -385,6 +385,6 @@ async def rm(nid: str, uid: str = Depends(me), s: AsyncSession = Depends(get_ses
     if keys and storage.enabled():
         try:
             await run_in_threadpool(storage.delete, list(keys))
-        except Exception as e:  # note is gone either way; orphan logged (todo.md §S.E E-17)
+        except Exception as e:  # note is gone either way; orphaned object logged with its key
             log.warning("s3 delete failed for note %s keys=%s: %r", nid, list(keys), e)
     return {"ok": True}

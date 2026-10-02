@@ -1,4 +1,17 @@
 # voice routes: shhh... listening (with permission).
+"""Voice → text, with the audio kept in S3 (core/storage.py).
+
+Flow (Whisper upload tier, notes/page.tsx):
+  stop recording → POST /voice/transcribe (audio + duration_ms)
+    ├ store():  S3 upload → INSERT recordings row (s3_url, presigned_url, uploaded_at …)
+    └ Whisper on the same bytes                       ← both run in parallel
+  → {transcript, recording_id} → draft → Save (POST /notes) links the clip to the note
+  → BackgroundTask _finalize writes status + transcript onto the row.
+Failure rules: upload fails → no row, transcript still returned (recording_id null);
+row insert fails → uploaded object deleted; Whisper fails but audio stored → 502 with
+recording_id so the UI offers Retry (POST /voice/recordings/{id}/retry reads it back).
+Playback: GET /voice/recordings/{id}/url hands out the stored 7-day link, re-signed when stale.
+"""
 import asyncio
 import datetime
 import logging
@@ -31,6 +44,7 @@ async def status(uid: str = Depends(me)):
 def _can_transcribe() -> bool:
     return settings.transcribe_engine == "local" or bool(settings.openai_api_key)
 
+# Used by: _transcribe_bytes — picks local Whisper or the Whisper API.
 async def _transcribe_path(path: str) -> Tuple[str, str]:
     # (text, engine). Local Whisper is CPU-bound → threadpool so the S3 upload runs alongside.
     if settings.transcribe_engine == "local":
@@ -38,6 +52,7 @@ async def _transcribe_path(path: str) -> Tuple[str, str]:
         return await run_in_threadpool(transcribe_local, path), "local"
     return await transcribe(path), "api"
 
+# Used by: transcribe_audio() + retry() — Whisper needs a file, so bytes go via a temp file.
 async def _transcribe_bytes(data: bytes, ext: str) -> Tuple[str, str]:
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:  # whisper needs a file path
         tmp.write(data)
@@ -47,6 +62,7 @@ async def _transcribe_bytes(data: bytes, ext: str) -> Tuple[str, str]:
     finally:
         os.unlink(path)  # temp copy never outlives the request
 
+# Used by: transcribe_audio (row insert), _finalize, _fresh_link — single-statement writes.
 async def _exec(q: str, p: dict) -> None:
     # One autocommit statement = one round trip. Neon is ~300ms away, so the voice hot
     # path pays for one trip (hidden behind Whisper) instead of BEGIN/INSERT/COMMIT.
@@ -54,6 +70,7 @@ async def _exec(q: str, p: dict) -> None:
         c = await c.execution_options(isolation_level="AUTOCOMMIT")
         await c.execute(sql(q), p)
 
+# Used by: transcribe_audio via BackgroundTasks (after the response is sent).
 async def _finalize(rid: str, ok: bool, words: str, engine_name: str, err: str) -> None:
     # After the response: settle status/transcript. Never downgrades a clip the user already saved (note_id set).
     try:
@@ -63,6 +80,7 @@ async def _finalize(rid: str, ok: bool, words: str, engine_name: str, err: str) 
     except Exception as e:  # row stays 'uploading' (all URL fields already set); still linkable
         log.warning("finalize failed rid=%s: %r", rid, e)
 
+# Used by: play_url() — routes/notes.py one() applies the same rule inline for a note's clips.
 async def _fresh_link(row) -> Tuple[str, object]:
     # Stored presigned link, re-signed (and saved) when expiring or signed by a rotated key.
     url, exp = row["presigned_url"], row["presigned_expires_at"]
@@ -72,6 +90,7 @@ async def _fresh_link(row) -> Tuple[str, object]:
                     {"u": url, "e": exp, "i": str(row["id"])})
     return url, exp
 
+# Used by: retry() + play_url() — ownership check before touching a clip.
 async def _own_recording(s: AsyncSession, uid: str, rid: str):
     # Recording row owned by this user, or None (bad uuid / other user's / missing).
     try:
@@ -85,7 +104,7 @@ async def _own_recording(s: AsyncSession, uid: str, rid: str):
 # Used by: Tier-2 voice (upload) in notes/page.tsx startUpload/stopRecorder.
 # Flow: mic → MediaRecorder → POST here (audio + duration_ms) → S3 upload ∥ Whisper from the same
 # bytes → {transcript, recording_id} → editable draft → Save links the recording (POST /notes).
-# S3 off → same as before (transcript only, recording_id null). See todo.md §S.C / §S.E.
+# S3 off → same as before (transcript only, recording_id null). Failure rules: module docstring.
 @router.post("/transcribe")
 async def transcribe_audio(resp: Response, tasks: BackgroundTasks, audio: UploadFile = File(...), duration_ms: int = Form(0),
                            uid: str = Depends(me)):
@@ -172,7 +191,7 @@ async def retry(rid: str, resp: Response, uid: str = Depends(me), s: AsyncSessio
     await s.commit()
     return {"transcript": words, "engine": engine, "recording_id": rid}
 
-# Used by: future playback in NoteDialog (todo.md §S8.1). Stored 7-day link, refreshed when stale.
+# Used by: playback (a NoteDialog play button is still to come). Stored 7-day link, refreshed when stale.
 @router.get("/recordings/{rid}/url")
 async def play_url(rid: str, uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
     row = await _own_recording(s, uid, rid)
