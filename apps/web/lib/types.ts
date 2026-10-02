@@ -1,13 +1,16 @@
 export type NoteType = "idea" | "task" | "note" | "person" | "link" | "expense" | "journal";
 
-export const TYPES: Record<NoteType, { label: string; hue: string; bg: string }> = {
-  idea: { label: "Idea", hue: "#B26B00", bg: "#FFF4E0" },
-  task: { label: "Task", hue: "#1F7A8C", bg: "#E4F4F7" },
-  note: { label: "Note", hue: "#4B5565", bg: "#EEF0F4" },
-  person: { label: "Person", hue: "#2F8A57", bg: "#E5F5EC" },
-  link: { label: "Link", hue: "#2C6FD1", bg: "#E7F0FD" },
-  expense: { label: "Expense", hue: "#C2462E", bg: "#FDECE8" },
-  journal: { label: "Journal", hue: "#C23A78", bg: "#FCE9F2" },
+// Colors are CSS tokens (globals.css --t-*) so every type re-themes in dark mode.
+const tok = (k: NoteType, label: string) => ({ label, hue: `var(--t-${k})`, bg: `var(--t-${k}-bg)`, line: `var(--t-${k}-line)` });
+
+export const TYPES: Record<NoteType, { label: string; hue: string; bg: string; line: string }> = {
+  idea: tok("idea", "Idea"),
+  task: tok("task", "Task"),
+  note: tok("note", "Note"),
+  person: tok("person", "Person"),
+  link: tok("link", "Link"),
+  expense: tok("expense", "Expense"),
+  journal: tok("journal", "Journal"),
 };
 
 export type Note = {
@@ -21,14 +24,22 @@ export type Note = {
   action_items?: string[];
   category?: string;
   keywords?: string[];
+  color?: string;
+  enrich_state?: "pending" | "done"; // "pending" right after save until the background AI step lands      // "" = type default, a preset key (lib/colors.ts), or "#rrggbb"
   created_at?: string;
-  related?: Related[]; // linked notes across all pages, computed server-side
+  updated_at?: string;
+  related?: Related[];
+  // Voice clips (audio in S3), GET /notes/{id} only. presigned_url is a 7-day bearer link, re-signed server-side when stale.
+  recordings?: {
+    id: string; duration_ms: number; recorded_at: string; uploaded_at: string;
+    s3_url: string; presigned_url: string; presigned_expires_at: string;
+  }[]; // linked notes across all pages, computed server-side
 };
 
 export type Related = { id: string; title: string; shared: string[] };
 
-// GET /notes?page&per&sort&type
-export type NotesPage = { items: Note[]; total: number; page: number; per: number; pages: number };
+// GET /notes?per&sort&type[&cursor] — next_cursor is null on the last batch (page fields only without a cursor)
+export type NotesPage = { items: Note[]; next_cursor?: string | null; total?: number; page?: number; per?: number; pages?: number };
 
 // GET /notes/stats
 export type NoteStats = { total: number; counts: Record<string, number>; connections: number };

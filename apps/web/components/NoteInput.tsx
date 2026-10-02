@@ -53,7 +53,7 @@ const NoteInput = forwardRef<{ focus: () => void }, Props>(function NoteInput(
   }, [voice, onCancelVoice]);
 
   return (
-    <div className={`rounded-2xl border bg-bg p-3 transition-[border-color,box-shadow] duration-200 ${open ? "border-primary shadow-[0_0_0_4px_var(--primary-100)]" : "border-line hover:border-line-strong"}`}>
+    <div className={`rounded-2xl border bg-bg p-3 transition-[border-color,box-shadow] duration-200 ${open ? "border-primary shadow-[0_0_0_4px_var(--primary-100),0_6px_16px_-10px_rgb(var(--shadow)/.22)]" : "border-line hover:border-line-strong shadow-[0_4px_12px_-8px_rgb(var(--shadow)/.16)] hover:shadow-[0_6px_16px_-9px_rgb(var(--shadow)/.22)]"}`}>
       <label htmlFor="draft" className="sr-only">New note</label>
       <div className="relative">
         <textarea id="draft" ref={ta} rows={2} value={draft} onChange={e => setDraft(e.target.value)}

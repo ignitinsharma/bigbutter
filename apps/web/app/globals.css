@@ -12,6 +12,27 @@
   /* legacy aliases — keep stray classes rendering on-palette */
   --paper:var(--bg); --card:var(--bg); --accent:var(--primary);
   --page:#F7F7FB; --shadow:23 21 31; --sk-a:#F2F1F6; --sk-b:#F8F7FB;
+  /* note types: accent (text/dots), card surface, card edge */
+  --t-idea:#B26B00;    --t-idea-bg:#FFF6E5;    --t-idea-line:#F2C46D;
+  --t-task:#1F7A8C;    --t-task-bg:#E8F5F8;    --t-task-line:#8CCAD6;
+  --t-note:#4B5565;    --t-note-bg:#F1F2F5;    --t-note-line:#C4C9D3;
+  --t-person:#2F8A57;  --t-person-bg:#E9F6EE;  --t-person-line:#95CFAD;
+  --t-link:#2C6FD1;    --t-link-bg:#EBF2FD;    --t-link-line:#9DBDF0;
+  --t-expense:#C2462E; --t-expense-bg:#FDEFEB; --t-expense-line:#EFA594;
+  --t-journal:#C23A78; --t-journal-bg:#FCEDF4; --t-journal-line:#E9A0C2;
+  /* note background presets (palette) */
+  --c-coral-bg:#FBD3CF;    --c-coral-line:#F2A69E;
+  --c-peach-bg:#FBE1C6;    --c-peach-line:#F0BC86;
+  --c-sand-bg:#F3EADB;     --c-sand-line:#DCCAA8;
+  --c-lemon-bg:#FFF4BD;    --c-lemon-line:#EEDB7A;
+  --c-mint-bg:#D7F3E3;     --c-mint-line:#A3DCBD;
+  --c-sage-bg:#E4EDD8;     --c-sage-line:#BED2A5;
+  --c-sky-bg:#D7EAF7;      --c-sky-line:#A3CBE8;
+  --c-mist-bg:#E6EAF0;     --c-mist-line:#C3CBD7;
+  --c-lavender-bg:#E9E0F8; --c-lavender-line:#C7B5EC;
+  --c-blush-bg:#F9E0EA;    --c-blush-line:#EAB3CA;
+  /* custom hex swatches are mixed into the page: color-mix(hex pct, base) */
+  --cm-base:#FFFFFF; --cm-bg:42%; --cm-line:70%;
 }
 /* Dark tokens are scoped to the element carrying data-theme (the notes page root), so /login stays light. */
 [data-theme="dark"] {
@@ -20,6 +41,24 @@
   --primary:#8B79FF; --primary-600:#9D8EFF; --primary-50:#1F1A36; --primary-100:#2E2754;
   --danger:#F07171; --danger-50:#2A1717;
   --page:#0D0C12; --shadow:0 0 0; --sk-a:#1C1B25; --sk-b:#24222F;
+  --t-idea:#F0B44C;    --t-idea-bg:#2A2113;    --t-idea-line:#6B4E1C;
+  --t-task:#5CC3D6;    --t-task-bg:#132629;    --t-task-line:#245761;
+  --t-note:#A5ADBD;    --t-note-bg:#1E2028;    --t-note-line:#434858;
+  --t-person:#66CC92;  --t-person-bg:#142620;  --t-person-line:#285A3E;
+  --t-link:#7AA8F5;    --t-link-bg:#161F33;    --t-link-line:#2E4A7A;
+  --t-expense:#F08A73; --t-expense-bg:#2C1915; --t-expense-line:#6E3326;
+  --t-journal:#EE7FB0; --t-journal-bg:#2B1622; --t-journal-line:#6A2D4A;
+  --c-coral-bg:#4A2522;    --c-coral-line:#6E3631;
+  --c-peach-bg:#47301C;    --c-peach-line:#694627;
+  --c-sand-bg:#37322A;     --c-sand-line:#51493B;
+  --c-lemon-bg:#433D1C;    --c-lemon-line:#635A2A;
+  --c-mint-bg:#1D3A31;     --c-mint-line:#2B5446;
+  --c-sage-bg:#28331F;     --c-sage-line:#3B4B2D;
+  --c-sky-bg:#1C3243;      --c-sky-line:#29495F;
+  --c-mist-bg:#272C34;     --c-mist-line:#3A414C;
+  --c-lavender-bg:#30264A; --c-lavender-line:#463766;
+  --c-blush-bg:#412432;    --c-blush-line:#5E3448;
+  --cm-base:#15141C; --cm-bg:26%; --cm-line:42%;
   color-scheme: dark;
 }
 [data-theme="light"] { color-scheme: light; }
@@ -45,6 +84,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 .btn-ghost { background: var(--bg); color: var(--soft); border: 1px solid var(--line); }
 .btn-ghost:hover:not(:disabled) { border-color: var(--line-strong); color: var(--ink); background: var(--surface); }
 .btn-press:active { transform: scale(.97); }
+/* faint ink wash for sections sitting on a colored note surface */
+.wash { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.on-tint .btn:not(.btn-primary):hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 8%, transparent); }
 
 }
 

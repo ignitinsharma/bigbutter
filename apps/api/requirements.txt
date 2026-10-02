@@ -11,3 +11,4 @@ pydantic-settings
 python-multipart
 openai-whisper
 sentence-transformers
+boto3

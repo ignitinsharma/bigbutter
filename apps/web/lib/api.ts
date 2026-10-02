@@ -8,8 +8,10 @@ export async function api(path: string, opts: RequestInit = {}) {
   const r = await fetch(`${API}${path}`, { credentials: "include", ...opts, headers });
   if (!r.ok) {
     // Surface HTTP status so callers can tell 401 (logged out) from outages.
-    const err = new Error(`http ${r.status}`) as Error & { status: number };
+    // Body too: e.g. 502 {error:"transcribe_failed", recording_id} → the UI can offer Retry.
+    const err = new Error(`http ${r.status}`) as Error & { status: number; body?: any };
     err.status = r.status;
+    err.body = await r.json().catch(() => null);
     throw err;
   }
   return r.json();
