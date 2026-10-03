@@ -11,6 +11,8 @@ import NoteInput from "../../components/NoteInput";
 import NoteBoard, { noteAnchor } from "../../components/NoteBoard";
 import NoteDialog, { type NoteEdits } from "../../components/NoteDialog";
 import FilterChips from "../../components/FilterChips";
+import BucketChips from "../../components/BucketChips";
+import { bucketOf } from "../../lib/buckets";
 import GraphView from "../../components/GraphView";
 import Notice from "../../components/Notice";
 import Navbar from "../../components/Navbar";
@@ -45,6 +47,8 @@ export default function Notes() {
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | NoteType>("all");
+  const [bucket, setBucket] = useState<string | null>(null); // bucket filter; null = every bucket
+  const [listGen, setListGen] = useState(0); // bump to refetch the stream (bucket renames/deletes rewrite many notes)
   const [notice, setNotice] = useState("");
   const [remote, setRemote] = useState<Note[] | null>(null); // backend /search rows; null = local filter
   const [summary, setSummary] = useState("");
@@ -273,7 +277,7 @@ export default function Notes() {
 
   // Refresh navbar totals + filter counts after any mutation.
   const loadStats = () => api("/notes/stats").then(
-    (r: NoteStats) => { if (r && typeof r.total === "number") setStats({ total: r.total, counts: r.counts || {}, connections: r.connections || 0 }); },
+    (r: NoteStats) => { if (r && typeof r.total === "number") setStats({ total: r.total, counts: r.counts || {}, connections: r.connections || 0, buckets: r.buckets || {}, bucket_names: r.bucket_names || [] }); },
     (e: { status?: number }) => { authFail(e); },
   );
   useEffect(() => { loadStats(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -284,16 +288,16 @@ export default function Notes() {
 
   // First batch of the stream for this sort + filter. The loaded list survives searches and
   // mutations (they patch it in place), so scroll depth is never lost; only a view change resets it.
-  const viewKey = `${sort}|${filter}`;
+  const viewKey = `${sort}|${filter}|${bucket ?? ""}|${listGen}`;
   // Live view for async callbacks (enrich polling, PUT round trips) that outlive the render they began in.
-  const live = useRef({ sort, filter, hasMore });
-  live.current = { sort, filter, hasMore };
+  const live = useRef({ sort, filter, bucket, hasMore });
+  live.current = { sort, filter, bucket, hasMore };
   useEffect(() => {
     const ctl = new AbortController();
     viewRef.current = viewKey;
     moreCtl.current?.abort(); moreCtl.current = null; busyMore.current = false;
     setLoadingMore(false); setMoreErr(false); setListLoading(true);
-    const qs = new URLSearchParams({ per: String(BATCH), sort, ...(filter !== "all" ? { type: filter } : {}) });
+    const qs = new URLSearchParams({ per: String(BATCH), sort, ...(filter !== "all" ? { type: filter } : {}), ...(bucket ? { bucket } : {}) });
     api(`/notes?${qs}`, { signal: ctl.signal }).then(
       (r: NotesPage) => {
         if (ctl.signal.aborted) return;
@@ -323,7 +327,7 @@ export default function Notes() {
     setLoadingMore(true); setMoreErr(false);
     const ctl = new AbortController();
     moreCtl.current = ctl;
-    const qs = new URLSearchParams({ per: String(BATCH), sort, cursor, ...(filter !== "all" ? { type: filter } : {}) });
+    const qs = new URLSearchParams({ per: String(BATCH), sort, cursor, ...(filter !== "all" ? { type: filter } : {}), ...(bucket ? { bucket } : {}) });
     api(`/notes?${qs}`, { signal: ctl.signal }).then(
       (r: NotesPage) => {
         if (ctl.signal.aborted || key !== viewRef.current) return;
@@ -354,6 +358,19 @@ export default function Notes() {
   // Changing the view shortens the list — bring the toolbar back into view if we were below it.
   const toListTop = () => { if (listTop.current && listTop.current.getBoundingClientRect().top < 0) listTop.current.scrollIntoView({ block: "start" }); };
   const changeFilter = (f: "all" | NoteType) => { setFilter(f); setSel(null); toListTop(); };
+  const changeBucket = (b: string | null) => { setBucket(b); setSel(null); toListTop(); };
+  // Bucket manager: save the list, keep the active filter pointing at the same bucket, refetch notes.
+  const saveBuckets = async (names: string[], renames: Record<string, string>) => {
+    try {
+      const r: { buckets: string[] } = await api("/buckets", { method: "PUT", body: JSON.stringify({ buckets: names, renames }) });
+      if (bucket && !r.buckets.includes(renames[bucket] ?? bucket)) setBucket(null);
+      else if (bucket && renames[bucket]) setBucket(renames[bucket]);
+      setListGen(g => g + 1);
+      reload();
+    } catch (e) {
+      if (!authFail(e as { status?: number })) setNotice("Couldn't save buckets — is the API running?");
+    }
+  };
   const changeSort = (v: Sort) => { setSort(v); setSel(null); toListTop(); };
   const changeQuery = (v: string) => { setQuery(v); setSel(null); };
 
@@ -382,6 +399,7 @@ export default function Notes() {
   // Search results (small, capped server-side) are filtered/sorted here; the stream comes in batches.
   const searchRows = (remote ?? [])
     .filter(n => filter === "all" || (n.type || "note") === filter)
+    .filter(n => !bucket || bucketOf(n.bucket) === bucket)
     .sort((a, b) => (sort === "new" ? ts(b) - ts(a) : ts(a) - ts(b)));
   const matched = remote ? remote.map(n => n.id) : null;
   const shown = scoped ? searchRows : items;
@@ -483,8 +501,8 @@ export default function Notes() {
   // type no longer matches, slot it in by date when it newly does. A slot past the last loaded note
   // is left to the next batch (the cursor brings it; loadMore skips duplicates).
   const reconcile = (n: Note) => {
-    const { sort, filter, hasMore } = live.current;
-    const fits = filter === "all" || (n.type || "note") === filter;
+    const { sort, filter, bucket, hasMore } = live.current;
+    const fits = (filter === "all" || (n.type || "note") === filter) && (!bucket || bucketOf(n.bucket) === bucket);
     setItems(prev => {
       const at = prev.findIndex(x => x.id === n.id);
       if (!fits) return at < 0 ? prev : prev.filter(x => x.id !== n.id);
@@ -495,7 +513,7 @@ export default function Notes() {
     });
   };
 
-  const mutate = async (id: string, body: Partial<Pick<Note, "raw_text" | "title" | "type" | "tags" | "color">>, patch: Partial<Note>, fail: string) => {
+  const mutate = async (id: string, body: Partial<Pick<Note, "raw_text" | "title" | "type" | "tags" | "color" | "bucket">>, patch: Partial<Note>, fail: string) => {
     patchLocal(id, patch);
     const enrich = body.raw_text !== undefined; // text edits re-run AI — show "refreshing" until the row is back
     if (enrich) setRefreshing(r => new Set(r).add(id));
@@ -626,6 +644,12 @@ export default function Notes() {
                 {view === "stream" && <div className="shrink-0"><SortMenu sort={sort} onSort={changeSort} /></div>}
               </div>
             </div>
+            {view === "stream" && stats.total > 0 && !!stats.bucket_names?.length && (
+              <div className="-mt-1 mb-4">
+                <BucketChips names={stats.bucket_names} counts={stats.buckets || {}} active={bucket}
+                  onPick={changeBucket} onSave={saveBuckets} />
+              </div>
+            )}
 
             {view === "map" ? (
               stats.total === 0 && !loading ? empty("No notes to map", "Save a note first. The map draws itself from the tags and people your notes share.", true) :
@@ -696,10 +720,10 @@ export default function Notes() {
               <div className="columns-1 min-[560px]:columns-2 min-[860px]:columns-3 min-[1100px]:columns-4 gap-3" aria-busy="true" aria-label={scoped ? "Searching" : "Loading notes"}>
                 {[120, 180, 96, 150, 200, 110, 140, 170].map((h, i) => <div key={i} className="skeleton rounded-xl mb-3 break-inside-avoid" style={{ height: h }} />)}
               </div>
-            ) : !scoped && filter === "all" && items.length === 0 && !hasMore ? (
+            ) : !scoped && filter === "all" && !bucket && items.length === 0 && !hasMore ? (
               empty("No notes yet", "Type a thought above, or tap the mic and say it. Each note gets a title, tags and connections.", true)
             ) : shown.length === 0 ? (
-              empty("No notes found", q ? `Nothing matches "${query.trim()}". Try another word, or clear the filter.` : "No notes of this type yet.")
+              empty("No notes found", q ? `Nothing matches "${query.trim()}". Try another word, or clear the filter.` : bucket ? `Nothing in ${bucket}${filter !== "all" ? " of this type" : ""} yet.` : "No notes of this type yet.")
             ) : (
               <>
                 {searching && (
@@ -713,7 +737,7 @@ export default function Notes() {
                     <p className="text-sm text-soft">{summary}</p>
                   </div>
                 )}
-                <NoteBoard key={`${filter}|${sort}|${q ? "q" : ""}`} notes={shown} batch={BATCH} sel={sel} highlightIds={matched}
+                <NoteBoard key={`${filter}|${bucket ?? ""}|${sort}|${q ? "q" : ""}`} notes={shown} batch={BATCH} sel={sel} highlightIds={matched}
                   refreshing={refreshing} palette={palette}
                   onOpen={openNote}
                   onSetColor={setColor}
@@ -743,11 +767,12 @@ export default function Notes() {
         </div>
       </div>
       {dialogNote && (
-        <NoteDialog key={dialogNote.id} note={dialogNote} palette={palette} refreshing={refreshing.has(dialogNote.id)}
+        <NoteDialog key={dialogNote.id} note={dialogNote} palette={palette} buckets={stats.bucket_names || []} refreshing={refreshing.has(dialogNote.id)}
           onDone={closeNote}
           onSetColor={c => setColor(dialogNote.id, c)}
           onSetType={t => mutate(dialogNote.id, { type: t }, { type: t }, "Couldn't save the type — is the API running?")}
           onSetTags={tags => mutate(dialogNote.id, { tags }, { tags }, "Couldn't save tags — is the API running?")}
+          onSetBucket={b => mutate(dialogNote.id, { bucket: b }, { bucket: b }, "Couldn't save the bucket — is the API running?")}
           onRegenerate={() => mutate(dialogNote.id, { raw_text: dialogNote.raw_text }, {}, "Couldn't regenerate the summary — is the API running?")}
           onDelete={() => remove(dialogNote.id)}
           onTag={changeQuery}

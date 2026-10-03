@@ -17,6 +17,7 @@ from core.openai_client import extract_note, embed, NotConfigured, NOTE_TYPES
 from core.local_extract import local_extract
 from core.local_embed import embed_local
 from core import storage
+from core import buckets as bk
 
 router = APIRouter()
 log = logging.getLogger("bigbutter.notes")
@@ -62,6 +63,30 @@ async def put_palette(p: PaletteIn, uid: str = Depends(me), s: AsyncSession = De
     await s.commit()
     return {"colors": colors}
 
+# Used by: BucketChips manager — full list replace; renames carry their notes along.
+class BucketsIn(BaseModel):
+    buckets: list[str]
+    renames: dict[str, str] = {}  # old name → new name
+
+@router.get("/buckets")
+async def get_buckets(uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
+    return {"buckets": await _bucket_list(s, uid)}
+
+@router.put("/buckets")
+async def put_buckets(p: BucketsIn, uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
+    """Save the list. Renamed buckets keep their notes (and locks); notes left in a bucket
+    that no longer exists move to Other and unlock, so the next edit can re-bucket them."""
+    old, new = await _bucket_list(s, uid), bk.normalize(p.buckets)
+    for o, n in p.renames.items():
+        src, dst = bk.match(o, old), bk.match(n, new)
+        if src and dst and src != dst:
+            await s.execute(text("UPDATE notes SET bucket=:n WHERE user_id=:u AND bucket=:o"), {"n": dst, "o": src, "u": uid})
+    await s.execute(text("UPDATE notes SET bucket=:other, bucket_locked=false WHERE user_id=:u AND bucket <> '' "
+                         "AND NOT (bucket = ANY(CAST(:keep AS text[])))"), {"other": bk.OTHER, "keep": new, "u": uid})
+    await s.execute(text("UPDATE users SET buckets=:b WHERE id=:u"), {"b": new, "u": uid})
+    await s.commit()
+    return {"buckets": new}
+
 # Used by: GET /search (understand_query) — the user's existing categories for stable word senses.
 async def _known_categories(s: AsyncSession, uid: str) -> list:
     # Distinct non-empty categories this user has, to keep extraction vocabulary stable.
@@ -71,13 +96,18 @@ async def _known_categories(s: AsyncSession, uid: str) -> list:
     )).all()
     return [r[0] for r in rows if r[0]]
 
-# Used by: _enrich() — tags + categories in one round trip (Neon is ~300ms away per trip).
+# Used by: _enrich() — tags + categories + bucket list in one round trip (Neon is ~300ms away per trip).
 async def _known_terms(s: AsyncSession, uid: str):
     r = (await s.execute(text(
         "SELECT ARRAY(SELECT DISTINCT t FROM notes, unnest(tags) AS t WHERE user_id=:u AND t <> '' LIMIT 40), "
-        "ARRAY(SELECT DISTINCT category FROM notes WHERE user_id=:u AND category <> '' LIMIT 40)"),
+        "ARRAY(SELECT DISTINCT category FROM notes WHERE user_id=:u AND category <> '' LIMIT 40), "
+        "(SELECT buckets FROM users WHERE id=:u)"),
         {"u": uid})).first()
-    return list(r[0] or []), list(r[1] or [])
+    return list(r[0] or []), list(r[1] or []), bk.normalize(r[2])
+
+# Used by: bucket routes, PUT /notes/{nid} — the user's bucket list (defaults when never edited).
+async def _bucket_list(s: AsyncSession, uid: str) -> list:
+    return bk.normalize((await s.execute(text("SELECT buckets FROM users WHERE id=:u"), {"u": uid})).scalar())
 
 # Used by: _enrich() — builds the vector input so the stored sense disambiguates.
 def _embed_text(raw: str, rec: dict) -> str:
@@ -90,12 +120,13 @@ def _embed_text(raw: str, rec: dict) -> str:
     return f"{raw}\n{extra}" if extra else raw
 
 # Used by: POST /notes, PUT /notes/{nid}, scripts/reenrich.py — the save-time AI step.
-async def _compute(raw: str, known: list, cats: list):
+async def _compute(raw: str, known: list, cats: list, buckets: list):
     """The slow, DB-free half: LLM structuring + embedding. Each fails open independently:
     LLM extract needs LLM_ENGINE reachable (Ollama or key, else rule-based), cloud
-    embed needs a key (else local MiniLM when EMBED_ENGINE=local, else no vector)."""
+    embed needs a key (else local MiniLM when EMBED_ENGINE=local, else no vector).
+    Bucket: the LLM's pick from the list, else nearest bucket by MiniLM, else Other."""
     try:
-        rec = await extract_note(raw, known, cats)  # cloud/LLM structuring (raises NotConfigured offline)
+        rec = await extract_note(raw, known, cats, buckets)  # cloud/LLM structuring (raises NotConfigured offline)
     except NotConfigured:
         rec = local_extract(raw, known, cats)  # rule-based fallback: raw note still gets fields
     etext = _embed_text(raw, rec)  # raw + "About:/Related:" so Apple-mobile ≠ Apple-fruit
@@ -110,15 +141,27 @@ async def _compute(raw: str, known: list, cats: list):
             emb = ("note_embeddings", await embed(etext), settings.embedding_model)  # cloud 1536-dim
         except NotConfigured:
             pass  # no key → note just isn't searchable yet
+    if not rec.get("bucket"):  # LLM off/unreachable or answered off-list
+        rec["bucket"] = bk.OTHER
+        if emb and emb[0] == "note_embeddings_local":  # MiniLM vector already in hand → compare to bucket descriptions
+            try:
+                rec["bucket"] = await run_in_threadpool(bk.pick_by_vector, emb[1], buckets)
+            except RuntimeError:
+                pass
     return rec, emb
 
 async def _store(s: AsyncSession, nid: str, rec: dict, emb) -> None:
     # Persist the structured record (keywords as CSV) + upsert the vector (re-embed on edit overwrites).
     await s.execute(
         text("UPDATE notes SET title=:ti, type=:ty, summary=:su, tags=:ta, people=:pe, action_items=:ac, "
-             "category=:ca, keywords=:kw, updated_at=now() WHERE id=:i"),
+             # Hand-picked bucket sticks; an AI pick whose bucket was deleted/renamed mid-enrich lands in Other.
+             "category=:ca, keywords=:kw, bucket=CASE WHEN bucket_locked THEN bucket "
+             "  WHEN :bu = ANY(coalesce((SELECT buckets FROM users WHERE id = notes.user_id), CAST(:defaults AS text[]))) THEN :bu "
+             f"  ELSE '{bk.OTHER}' END, "
+             "updated_at=now() WHERE id=:i"),
         {"ti": rec["title"], "ty": rec["type"], "su": rec["summary"], "ta": rec["tags"], "pe": rec["people"],
-         "ac": rec["action_items"], "ca": rec.get("category") or "", "kw": ", ".join(rec.get("keywords") or []), "i": nid},
+         "ac": rec["action_items"], "ca": rec.get("category") or "", "kw": ", ".join(rec.get("keywords") or []),
+         "bu": rec.get("bucket") or bk.OTHER, "defaults": bk.normalize(None), "i": nid},
     )
     if emb:
         table, vec, model = emb
@@ -130,8 +173,8 @@ async def _store(s: AsyncSession, nid: str, rec: dict, emb) -> None:
 
 # Used by: PUT /notes/{nid}, scripts/reenrich.py — synchronous enrichment inside the caller's transaction.
 async def _enrich(s: AsyncSession, uid: str, nid: str, raw: str):
-    known, cats = await _known_terms(s, uid)  # reuse existing tags/categories → connected graph, stable senses
-    rec, emb = await _compute(raw, known, cats)
+    known, cats, buckets = await _known_terms(s, uid)  # reuse existing tags/categories → connected graph, stable senses
+    rec, emb = await _compute(raw, known, cats, buckets)
     await _store(s, nid, rec, emb)
 
 # Used by: create() via BackgroundTasks — runs after the response so Save returns in ~0.3s.
@@ -141,8 +184,8 @@ async def _enrich_later(uid: str, nid: str, raw: str) -> None:
     Always ends 'done' so the UI stops waiting."""
     try:
         async with Session() as s:  # short: read vocabulary, release the connection
-            known, cats = await _known_terms(s, uid)
-        rec, emb = await _compute(raw, known, cats)  # seconds of LLM + embedding, no connection held
+            known, cats, buckets = await _known_terms(s, uid)
+        rec, emb = await _compute(raw, known, cats, buckets)  # seconds of LLM + embedding, no connection held
         async with Session() as s:  # short: write results + done flag in one transaction
             await _store(s, nid, rec, emb)
             await s.execute(text("UPDATE notes SET enrich_state='done' WHERE id=:i AND user_id=:u"), {"i": nid, "u": uid})
@@ -174,6 +217,7 @@ class NoteUpd(BaseModel):
     type: Optional[str] = None
     tags: Optional[list[str]] = None
     color: Optional[str] = None
+    bucket: Optional[str] = None  # one of the user's buckets; locks it against re-enrichment
 
 # Used by: POST /notes — frontend save button (notes/page.tsx save()).
 # Flow: INSERT raw → _enrich (extract + embed) → commit → {id}; frontend refetches.
@@ -206,17 +250,18 @@ async def create(n: NoteIn, tasks: BackgroundTasks, uid: str = Depends(me)):
     return {**out, "id": nid, "related": []}
 
 # Used by: lst(), one(), stats() — shared list plumbing (columns, blank-type norm, edge rule).
-NOTE_FIELDS = "id, raw_text, title, type, summary, tags, people, action_items, category, keywords, color, enrich_state, created_at, updated_at"
+NOTE_FIELDS = "id, raw_text, title, type, summary, tags, people, action_items, category, keywords, color, bucket, enrich_state, created_at, updated_at"
 TYPE_EXPR = "coalesce(nullif(type, ''), 'note')"
+BUCKET_EXPR = f"coalesce(nullif(bucket, ''), '{bk.OTHER}')"  # not enriched yet → Other
 # Same edge rule as /map: shared tag or person, or the same non-empty category.
 LINKED = "(a.tags && b.tags OR a.people && b.people OR (a.category <> '' AND lower(a.category) = lower(b.category)))"
 
 # Used by: lst() — clamps per/sort/type into SQL fragments.
-def _list_args(per: int, sort: str, type: Optional[str]):
+def _list_args(per: int, sort: str, type: Optional[str], bucket: Optional[str] = None):
     # Clamp the batch size and build the ORDER BY + WHERE fragment for list queries.
     per = max(1, min(per, 50))
     order = "ASC" if sort == "old" else "DESC"
-    where = "user_id=:u" + (f" AND {TYPE_EXPR} = :t" if type else "")
+    where = "user_id=:u" + (f" AND {TYPE_EXPR} = :t" if type else "") + (f" AND {BUCKET_EXPR} = :b" if bucket else "")
     return per, order, where
 
 # Used by: lst() — opaque "next batch" position. Built server-side so created_at keeps its
@@ -270,11 +315,11 @@ async def _related(s: AsyncSession, uid: str, page_rows: list) -> dict:
 # Cursor mode returns {items (+related), next_cursor}; page mode (no cursor) also keeps
 # {total, page, per, pages} for older clients. next_cursor is null on the last batch.
 @router.get("/notes")
-async def lst(page: int = 1, per: int = 10, sort: str = "new", type: Optional[str] = None, cursor: Optional[str] = None,
-              uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
-    """One batch of notes (newest or oldest first, optional type filter) + related notes per item."""
-    per, order, where = _list_args(per, sort, type)
-    args = {"u": uid, "t": type, "lim": per + 1}  # one extra row says whether more exist, no COUNT needed
+async def lst(page: int = 1, per: int = 10, sort: str = "new", type: Optional[str] = None, bucket: Optional[str] = None,
+              cursor: Optional[str] = None, uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
+    """One batch of notes (newest or oldest first, optional type/bucket filter) + related notes per item."""
+    per, order, where = _list_args(per, sort, type, bucket)
+    args = {"u": uid, "t": type, "b": bucket, "lim": per + 1}  # one extra row says whether more exist, no COUNT needed
     if cursor:
         args["c"], args["i"] = _dec_cursor(cursor)
         cmp = "<" if order == "DESC" else ">"
@@ -310,10 +355,13 @@ async def stats(uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
     """Totals for the navbar + filter chips, independent of the page being viewed."""
     counts = {r[0]: r[1] for r in (await s.execute(
         text(f"SELECT {TYPE_EXPR}, count(*) FROM notes WHERE user_id=:u GROUP BY 1"), {"u": uid})).all()}
+    bcounts = {r[0]: r[1] for r in (await s.execute(
+        text(f"SELECT {BUCKET_EXPR}, count(*) FROM notes WHERE user_id=:u GROUP BY 1"), {"u": uid})).all()}
     connections = (await s.execute(
         text(f"SELECT count(*) FROM notes a JOIN notes b ON b.user_id = a.user_id AND a.id < b.id AND {LINKED} "
              "WHERE a.user_id=:u"), {"u": uid})).scalar() or 0
-    return {"total": sum(counts.values()), "counts": counts, "connections": connections}
+    return {"total": sum(counts.values()), "counts": counts, "connections": connections,
+            "buckets": bcounts, "bucket_names": await _bucket_list(s, uid)}
 
 # Used by: GET /notes/{nid} — single-note fetch to refresh one row in place after an edit.
 @router.get("/notes/{nid}")
@@ -353,6 +401,11 @@ async def upd(nid: str, n: NoteUpd, uid: str = Depends(me), s: AsyncSession = De
         c = n.color.strip().lower()
         if c and c not in COLOR_PRESETS and not HEX.match(c):
             raise HTTPException(422, "unknown color")
+    bucket = None
+    if n.bucket is not None:
+        bucket = bk.match(n.bucket, await _bucket_list(s, uid))
+        if not bucket:
+            raise HTTPException(422, "unknown bucket")
     if n.raw_text is not None:
         await s.execute(text("UPDATE notes SET raw_text=:t, updated_at=now() WHERE id=:i AND user_id=:u"), {"t": n.raw_text, "i": nid, "u": uid})
         await s.flush()
@@ -369,6 +422,8 @@ async def upd(nid: str, n: NoteUpd, uid: str = Depends(me), s: AsyncSession = De
         await s.execute(text("UPDATE notes SET title=:t, updated_at=now() WHERE id=:i AND user_id=:u"), {"t": n.title.strip()[:120], "i": nid, "u": uid})
     if n.color is not None:
         await s.execute(text("UPDATE notes SET color=:c, updated_at=now() WHERE id=:i AND user_id=:u"), {"c": n.color.strip().lower(), "i": nid, "u": uid})
+    if bucket:
+        await s.execute(text("UPDATE notes SET bucket=:b, bucket_locked=true, updated_at=now() WHERE id=:i AND user_id=:u"), {"b": bucket, "i": nid, "u": uid})
     await s.commit()
     return {"ok": True}
 
