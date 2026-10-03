@@ -11,7 +11,7 @@ from core.local_embed import embed_local
 
 router = APIRouter()
 
-NOTE_COLS = "n.id, n.user_id, n.raw_text, n.title, n.type, n.summary, n.tags, n.people, n.action_items, n.category, n.keywords, n.color, n.source, n.created_at, n.updated_at"
+NOTE_COLS = "n.id, n.user_id, n.raw_text, n.title, n.type, n.summary, n.tags, n.people, n.action_items, n.category, n.keywords, n.color, n.bucket, n.source, n.created_at, n.updated_at"
 
 # Used by: search() below — merges the semantic/keyword/category legs into one ranking.
 def _rrf(rank_lists: list[list[str]], k: int = 60) -> list[str]:

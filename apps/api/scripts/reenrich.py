@@ -2,6 +2,8 @@
 
 Run once after Ollama is up (or keys land) so older notes get category,
 keywords, summary and a vector: `python3 scripts/reenrich.py [email]`.
+`--buckets` only (re)picks the bucket of notes the user hasn't set by hand —
+titles, tags and summaries you edited stay as they are.
 """
 import sys
 from pathlib import Path
@@ -11,7 +13,23 @@ import asyncio
 import time
 from sqlalchemy import text
 from db.session import Session
-from routes.notes import _enrich
+from routes.notes import _enrich, _known_terms, _compute
+
+async def buckets_only(email: str = ""):
+    # Bucket backfill: same pick as save time, writes only notes.bucket (skips hand-picked ones).
+    async with Session() as s:
+        q = "SELECT n.id, n.user_id, n.raw_text FROM notes n JOIN users u ON u.id = n.user_id WHERE NOT n.bucket_locked"
+        rows = (await s.execute(text(q + (" AND u.email = :e" if email else "") + " ORDER BY n.created_at"),
+                                {"e": email.strip().lower()})).mappings().all()
+        terms = {}
+        for i, r in enumerate(rows, 1):
+            uid = str(r["user_id"])
+            if uid not in terms:
+                terms[uid] = await _known_terms(s, uid)
+            rec, _ = await _compute(r["raw_text"], *terms[uid])
+            await s.execute(text("UPDATE notes SET bucket=:b WHERE id=:i AND NOT bucket_locked"), {"b": rec["bucket"], "i": r["id"]})
+            await s.commit()
+            print(f"{i}/{len(rows)} {rec['bucket']:<12} {r['raw_text'][:50]!r}")
 
 async def main(email: str = ""):
     # Backfill extraction + embeddings for old notes (e.g. after Ollama/keys land).
@@ -26,6 +44,8 @@ async def main(email: str = ""):
             await s.commit()  # per-note commit: a crash keeps earlier notes, rerun resumes rest
             print(f"{i}/{len(rows)} {time.time() - t:.1f}s")
 
-# CLI entry: `python3 scripts/reenrich.py [email]` — email optional, scopes to one user.
+# CLI entry: `python3 scripts/reenrich.py [--buckets] [email]` — email optional, scopes to one user.
 if __name__ == "__main__":
-    asyncio.run(main(sys.argv[1] if len(sys.argv) > 1 else ""))
+    args = [a for a in sys.argv[1:] if a != "--buckets"]
+    run = buckets_only if "--buckets" in sys.argv else main
+    asyncio.run(run(args[0] if args else ""))

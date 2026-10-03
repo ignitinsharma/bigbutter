@@ -7,6 +7,7 @@ import openai
 from openai import AsyncOpenAI
 from core.config import settings
 from core.local_extract import local_extract
+from core.buckets import normalize as normalize_buckets, match as match_bucket
 
 _client = None
 _local = None
@@ -69,12 +70,13 @@ async def embed(text: str) -> list[float]:
 NOTE_TYPES = ("idea", "task", "note", "person", "link", "expense", "journal")
 
 EXTRACT_PROMPT = """Turn this raw personal capture into one structured record.
-Return ONLY JSON: {"title":"under 8 words","type":"idea|task|note|person|link|expense|journal","summary":"1-2 short sentences, fix grammar, invent nothing","category":"1-3 lowercase words: what the note is ABOUT","keywords":["3-8 lowercase synonyms or broader terms for the category"],"tags":["2-5 lowercase topics"],"people":["names"],"action_items":["imperative phrases if actionable"]}
+Return ONLY JSON: {"title":"under 8 words","type":"idea|task|note|person|link|expense|journal","summary":"1-2 short sentences, fix grammar, invent nothing","bucket":"exactly one name from the Buckets list","category":"1-3 lowercase words: what the note is ABOUT","keywords":["3-8 lowercase synonyms or broader terms for the category"],"tags":["2-5 lowercase topics"],"people":["names"],"action_items":["imperative phrases if actionable"]}
 "task" only if they must DO something. "idea" for proposals and hypotheses. "expense" if money moved. "journal" for reflection. "note" is the fallback.
 category resolves the word's MEANING in context — the same word can mean different things:
 - "Apple is a great fruit" → category "fruit", keywords ["fruit","food","produce","healthy snack"]
 - "Apple is a good mobile" → category "mobile phone", keywords ["phone","smartphone","mobile","device","iphone"]
 - "Samsung is a mobile" → category "mobile phone", keywords ["phone","smartphone","mobile","device","android"]
+bucket = the broad life area, copied exactly from the Buckets list below; "Other" only if none fits.
 people = human names only, never brands or companies.
 Reuse an existing tag or category whenever it fits — inventing a synonym leaves notes unconnected forever."""
 
@@ -82,11 +84,14 @@ def _words(xs, n: int) -> list:
     # Lowercase + dedupe + trim a string list to n items (tags/keywords shape).
     return list(dict.fromkeys(str(x).lower().strip() for x in (xs or []) if str(x).strip()))[:n]
 
-async def extract_note(text: str, known_tags: Optional[list] = None, known_categories: Optional[list] = None) -> dict:
-    # Extract title/type/summary/category/tags/people/actions; normalizes + guards junk titles.
+async def extract_note(text: str, known_tags: Optional[list] = None, known_categories: Optional[list] = None,
+                       buckets: Optional[list] = None) -> dict:
+    # Extract title/type/summary/bucket/category/tags/people/actions; normalizes + guards junk titles.
     tags = ", ".join((known_tags or [])[:40]) or "none"
     cats = ", ".join((known_categories or [])[:40]) or "none"
-    rec = await _chat_json(f"{EXTRACT_PROMPT}\n\nExisting tags: {tags}\nExisting categories: {cats}\n\nCapture:\n\"\"\"{text}\"\"\"")
+    bl = buckets or normalize_buckets(None)
+    rec = await _chat_json(f"{EXTRACT_PROMPT}\n\nBuckets: {', '.join(bl)}\nExisting tags: {tags}\nExisting categories: {cats}\n\nCapture:\n\"\"\"{text}\"\"\"")
+    rec["bucket"] = match_bucket(str(rec.get("bucket") or ""), bl) or ""  # off-list → "" (caller's fallback decides)
     if rec.get("type") not in NOTE_TYPES:
         rec["type"] = "note"
     rec["tags"] = _words(rec.get("tags"), 5)

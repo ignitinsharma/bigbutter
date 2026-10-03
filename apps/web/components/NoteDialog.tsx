@@ -8,6 +8,8 @@ import { stamp } from "../lib/format";
 import Menu from "./Menu";
 import ColorPalette from "./ColorPalette";
 import TypePill from "./TypePill";
+import BucketPill from "./BucketPill";
+import { bucketOf, bucketTint } from "../lib/buckets";
 import IconButton, { I, TYPE_ICON } from "./IconButton";
 
 export type NoteEdits = { title?: string; raw_text?: string };
@@ -15,11 +17,13 @@ export type NoteEdits = { title?: string; raw_text?: string };
 type Props = {
   note: Note;
   palette: string[];
+  buckets: string[];         // the user's bucket list (Other last)
   refreshing: boolean;
   onDone: (edits: NoteEdits, next?: string) => void; // close (or hop to a connected note) — page saves edits
   onSetColor: (color: string) => void;
   onSetType: (t: NoteType) => void;
   onSetTags: (tags: string[]) => void;
+  onSetBucket: (b: string) => void;
   onRegenerate: () => Promise<void>;
   onDelete: () => void;
   onTag: (tag: string) => void;
@@ -32,7 +36,7 @@ async function copy(text: string): Promise<boolean> {
   try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
 }
 
-export default function NoteDialog({ note: n, palette, refreshing, onDone, onSetColor, onSetType, onSetTags, onRegenerate, onDelete, onTag, onNotice, onAddCustom, onRemoveCustom }: Props) {
+export default function NoteDialog({ note: n, palette, buckets, refreshing, onDone, onSetColor, onSetType, onSetTags, onSetBucket, onRegenerate, onDelete, onTag, onNotice, onAddCustom, onRemoveCustom }: Props) {
   const [title, setTitle] = useState(n.title || "");
   const [text, setText] = useState(n.raw_text);
   const [tagDraft, setTagDraft] = useState("");
@@ -136,7 +140,25 @@ export default function NoteDialog({ note: n, palette, refreshing, onDone, onSet
           <div className="flex items-start gap-2">
             <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title" aria-label="Title" maxLength={120}
               className="flex-1 min-w-0 bg-transparent outline-none font-display text-[21px] font-semibold tracking-tight text-ink placeholder:text-faint" />
-            <div className="pt-1.5"><TypePill type={n.type} /></div>
+            <div className="pt-1.5 flex items-center gap-1.5">
+              {n.enrich_state !== "pending" && (
+                <Menu width={180}
+                  items={[
+                    { heading: "Bucket" },
+                    ...buckets.map(b => ({
+                      label: <><span className="w-2.5 h-2.5 rounded-full border shrink-0" style={bucketTint(b)} aria-hidden />{b}</>,
+                      active: bucketOf(n.bucket) === b, onClick: () => onSetBucket(b),
+                    })),
+                  ]}
+                  trigger={({ open, toggle }) => (
+                    <button onClick={toggle} aria-haspopup="menu" aria-expanded={open} aria-label={`Bucket: ${bucketOf(n.bucket)}. Change bucket`}
+                      title="Change bucket" className="rounded-full hover:opacity-80">
+                      <BucketPill bucket={n.bucket} />
+                    </button>
+                  )} />
+              )}
+              <TypePill type={n.type} />
+            </div>
           </div>
           <textarea ref={area} value={text} onChange={e => setText(e.target.value)} placeholder="Take a note…" aria-label="Note text" rows={3}
             className="mt-2 w-full resize-none overflow-hidden bg-transparent outline-none text-[15px] leading-relaxed text-soft placeholder:text-faint" />

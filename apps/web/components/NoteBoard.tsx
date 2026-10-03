@@ -7,6 +7,7 @@ import { noteSurface } from "../lib/colors";
 import Menu from "./Menu";
 import ColorPalette from "./ColorPalette";
 import TypePill from "./TypePill";
+import BucketPill from "./BucketPill";
 import IconButton, { I, TYPE_ICON } from "./IconButton";
 
 export const noteAnchor = (id: string) => `note-${id}`;
@@ -117,6 +118,7 @@ function NoteCard({ note: n, i, sel, match, refreshing, palette, onOpen, onSetCo
         )}
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <TypePill type={n.type} size="sm" />
+          {n.enrich_state !== "pending" && <BucketPill bucket={n.bucket} size="sm" />}
           {tags.slice(0, 3).map(t => <span key={t} className="wash text-[11px] text-muted h-5 px-1.5 rounded-md inline-flex items-center">#{t}</span>)}
           {tags.length > 3 && <span className="text-[11px] text-faint">+{tags.length - 3}</span>}
         </div>

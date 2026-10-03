@@ -24,6 +24,7 @@ export type Note = {
   action_items?: string[];
   category?: string;
   keywords?: string[];
+  bucket?: string; // life area from the user's bucket list ("" until the AI step lands → shown as Other)
   color?: string;
   enrich_state?: "pending" | "done"; // "pending" right after save until the background AI step lands      // "" = type default, a preset key (lib/colors.ts), or "#rrggbb"
   created_at?: string;
@@ -42,7 +43,10 @@ export type Related = { id: string; title: string; shared: string[] };
 export type NotesPage = { items: Note[]; next_cursor?: string | null; total?: number; page?: number; per?: number; pages?: number };
 
 // GET /notes/stats
-export type NoteStats = { total: number; counts: Record<string, number>; connections: number };
+export type NoteStats = {
+  total: number; counts: Record<string, number>; connections: number;
+  buckets?: Record<string, number>; bucket_names?: string[]; // per-bucket counts + the user's list (Other last)
+};
 
 // Pill tint derived from the hue so it reads in both themes.
 export const tint = (hue: string, pct = 14) => `color-mix(in srgb, ${hue} ${pct}%, transparent)`;
