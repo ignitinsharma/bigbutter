@@ -97,7 +97,9 @@ async def extract_note(text: str, known_tags: Optional[list] = None, known_categ
     rec["title"] = str(rec.get("title") or "").strip()
     if _junk_title(rec["title"], text):
         rec["title"] = local_extract(text)["title"]
-    rec["summary"] = str(rec.get("summary") or "")
+    rec["summary"] = str(rec.get("summary") or "").strip()
+    if _junk_summary(rec["summary"]):
+        rec["summary"] = local_extract(text)["summary"]
     return rec
 
 def _stems(s: str) -> set:
@@ -111,6 +113,15 @@ def _junk_title(title: str, raw: str) -> bool:
     low = title.lower().strip(" .\"'")
     return (len(low.split()) < 2 or low in NOTE_TYPES or "8 words" in low
             or not (_stems(title) & _stems(raw)))
+
+# Phrases from EXTRACT_PROMPT's schema; a summary containing them is an echo, not a summary.
+_SCHEMA_ECHO = ("short sentences", "invent nothing", "fix grammar")
+
+def _junk_summary(summary: str) -> bool:
+    """Models sometimes return the schema placeholder ("1-2 short sentences, fix
+    grammar, invent nothing") as the summary — fall back to the rule summary."""
+    low = summary.lower()
+    return any(p in low for p in _SCHEMA_ECHO)
 
 QUERY_PROMPT = """You turn a search over personal notes into retrieval hints.
 Return ONLY JSON: {"terms":"the core subject words, no question filler","category":"1-3 lowercase words or empty","expansions":["3-6 lowercase synonyms / related words"]}

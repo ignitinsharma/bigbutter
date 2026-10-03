@@ -11,7 +11,7 @@ from core.local_embed import embed_local
 
 router = APIRouter()
 
-NOTE_COLS = "n.id, n.user_id, n.raw_text, n.title, n.type, n.summary, n.tags, n.people, n.action_items, n.category, n.keywords, n.source, n.created_at, n.updated_at"
+NOTE_COLS = "n.id, n.user_id, n.raw_text, n.title, n.type, n.summary, n.tags, n.people, n.action_items, n.category, n.keywords, n.color, n.source, n.created_at, n.updated_at"
 
 # Used by: search() below — merges the semantic/keyword/category legs into one ranking.
 def _rrf(rank_lists: list[list[str]], k: int = 60) -> list[str]:
@@ -137,12 +137,12 @@ async def mmap(ids: Optional[str] = None, uid: str = Depends(me), s: AsyncSessio
     hits: only those nodes, edges among them, degree recomputed inside."""
     # Load every note's link keys (tags/people/category), lowercased for case-insensitive edges.
     rows = (await s.execute(
-        text("SELECT id, title, type, summary, tags, people, category FROM notes WHERE user_id=:u"),
+        text("SELECT id, title, type, summary, tags, people, category, color FROM notes WHERE user_id=:u"),
         {"u": uid},
     )).mappings().all()
     only = {i.strip() for i in ids.split(",") if i.strip()} if ids is not None else None
     notes = [{"id": str(r["id"]), "title": r["title"] or "", "type": r["type"] or "note",
-              "summary": r["summary"] or "", "category": (r["category"] or "").lower(),
+              "summary": r["summary"] or "", "category": (r["category"] or "").lower(), "color": r["color"] or "",
               "tags": [str(t).lower() for t in (r["tags"] or [])],
               "people": [str(p).lower() for p in (r["people"] or [])]} for r in rows
              if only is None or str(r["id"]) in only]  # None = whole graph; set = search hits only
@@ -159,6 +159,6 @@ async def mmap(ids: Optional[str] = None, uid: str = Depends(me), s: AsyncSessio
     for l in links:
         deg[l["source"]] = deg.get(l["source"], 0) + 1
         deg[l["target"]] = deg.get(l["target"], 0) + 1
-    nodes = [{"id": n["id"], "title": n["title"], "type": n["type"], "summary": n["summary"], "category": n["category"],
+    nodes = [{"id": n["id"], "title": n["title"], "type": n["type"], "summary": n["summary"], "category": n["category"], "color": n["color"],
               "deg": deg.get(n["id"], 0), "r": 8 + min(10, deg.get(n["id"], 0) * 2)} for n in notes]
     return {"nodes": nodes, "edges": links}

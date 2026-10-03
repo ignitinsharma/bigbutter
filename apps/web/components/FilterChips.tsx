@@ -1,6 +1,7 @@
 "use client";
 
 import { TYPES, tint, type NoteType } from "../lib/types";
+import { TYPE_ICON } from "./IconButton";
 
 type Props = {
   counts: Record<string, number>;
@@ -26,7 +27,7 @@ export default function FilterChips({ counts, total, active, onPick }: Props) {
           <button key={k} onClick={() => onPick(k)} aria-pressed={on}
             className={`${base} ${on ? "" : "bg-bg border-line text-soft hover:border-line-strong"}`}
             style={on ? { background: tint(t.hue), borderColor: t.hue, color: t.hue } : undefined}>
-            <span className="w-2 h-2 rounded-full" style={{ background: t.hue }} aria-hidden />
+            <span style={{ color: t.hue }}>{TYPE_ICON[k]}</span>
             {t.label}
             <span className={`${badge} ${on ? "" : "bg-surface text-muted"}`} style={on ? { background: tint(t.hue, 22) } : undefined}>{counts[k]}</span>
           </button>
