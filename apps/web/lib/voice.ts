@@ -1,4 +1,4 @@
-// Port of prototype.html startVoice/stopVoice — framework-free so page.tsx stays thin.
+// Browser dictation (Web Speech API) — framework-free so page.tsx stays thin.
 // No new deps; minimal local types since DOM lib lacks SpeechRecognition.
 
 type SRInstance = {

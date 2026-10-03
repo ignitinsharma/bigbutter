@@ -10,17 +10,16 @@ Flow (Whisper upload tier, notes/page.tsx):
 Failure rules: upload fails → no row, transcript still returned (recording_id null);
 row insert fails → uploaded object deleted; Whisper fails but audio stored → 502 with
 recording_id so the UI offers Retry (POST /voice/recordings/{id}/retry reads it back).
-Playback: GET /voice/recordings/{id}/url hands out the stored 7-day link, re-signed when stale.
+Playback: GET /notes/{id} returns each clip's stored 7-day link, re-signed when stale.
 """
 import asyncio
-import datetime
 import logging
 import os
 import tempfile
 import uuid
 from typing import Tuple
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Response, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, Response, UploadFile, File
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import text as sql  # alias: `text` would clash with transcript variables
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,7 +61,7 @@ async def _transcribe_bytes(data: bytes, ext: str) -> Tuple[str, str]:
     finally:
         os.unlink(path)  # temp copy never outlives the request
 
-# Used by: transcribe_audio (row insert), _finalize, _fresh_link — single-statement writes.
+# Used by: transcribe_audio (row insert), _finalize — single-statement writes.
 async def _exec(q: str, p: dict) -> None:
     # One autocommit statement = one round trip. Neon is ~300ms away, so the voice hot
     # path pays for one trip (hidden behind Whisper) instead of BEGIN/INSERT/COMMIT.
@@ -80,17 +79,7 @@ async def _finalize(rid: str, ok: bool, words: str, engine_name: str, err: str) 
     except Exception as e:  # row stays 'uploading' (all URL fields already set); still linkable
         log.warning("finalize failed rid=%s: %r", rid, e)
 
-# Used by: play_url() — routes/notes.py one() applies the same rule inline for a note's clips.
-async def _fresh_link(row) -> Tuple[str, object]:
-    # Stored presigned link, re-signed (and saved) when expiring or signed by a rotated key.
-    url, exp = row["presigned_url"], row["presigned_expires_at"]
-    if storage.enabled() and storage.needs_resign(url, exp):
-        url, exp = storage.presign_get(row["s3_key"])
-        await _exec("UPDATE recordings SET presigned_url=:u, presigned_expires_at=:e WHERE id=CAST(:i AS uuid)",
-                    {"u": url, "e": exp, "i": str(row["id"])})
-    return url, exp
-
-# Used by: retry() + play_url() — ownership check before touching a clip.
+# Used by: retry() — ownership check before touching a clip.
 async def _own_recording(s: AsyncSession, uid: str, rid: str):
     # Recording row owned by this user, or None (bad uuid / other user's / missing).
     try:
@@ -106,17 +95,21 @@ async def _own_recording(s: AsyncSession, uid: str, rid: str):
 # bytes → {transcript, recording_id} → editable draft → Save links the recording (POST /notes).
 # S3 off → same as before (transcript only, recording_id null). Failure rules: module docstring.
 @router.post("/transcribe")
-async def transcribe_audio(resp: Response, tasks: BackgroundTasks, audio: UploadFile = File(...), duration_ms: int = Form(0),
-                           uid: str = Depends(me)):
+async def transcribe_audio(req: Request, resp: Response, tasks: BackgroundTasks, audio: UploadFile = File(...),
+                           duration_ms: int = Form(0), uid: str = Depends(me)):
     """Store the clip in S3 and transcribe it at the same time; returns text + recording id."""
     if not _can_transcribe():
         resp.status_code = 501  # keyless → frontend shows "not configured", keeps Tier-3 browser dictation
         return {"error": "not_configured"}
-    data = await audio.read()
+    limit = settings.audio_max_mb * 1024 * 1024
+    if int(req.headers.get("content-length") or 0) > limit + 64 * 1024:  # declared too big → refuse before reading (+form overhead)
+        resp.status_code = 413
+        return {"error": "too_large"}
+    data = await audio.read(limit + 1)  # never hold more than the limit (+1 byte to detect overflow) in memory
     if not data:
         resp.status_code = 400
         return {"error": "empty_audio"}
-    if len(data) > settings.audio_max_mb * 1024 * 1024:
+    if len(data) > limit:
         resp.status_code = 413
         return {"error": "too_large"}
     mime = (audio.content_type or "audio/webm").split(";")[0].strip().lower()  # drop ";codecs=opus"
@@ -190,16 +183,6 @@ async def retry(rid: str, resp: Response, uid: str = Depends(me), s: AsyncSessio
                     {"t": words, "e": engine, "i": rid})
     await s.commit()
     return {"transcript": words, "engine": engine, "recording_id": rid}
-
-# Used by: playback (a NoteDialog play button is still to come). Stored 7-day link, refreshed when stale.
-@router.get("/recordings/{rid}/url")
-async def play_url(rid: str, uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
-    row = await _own_recording(s, uid, rid)
-    if not row or not storage.enabled():
-        raise HTTPException(404)
-    url, exp = await _fresh_link(row)
-    left = int((exp - datetime.datetime.now(datetime.timezone.utc)).total_seconds()) if exp else 0
-    return {"url": url, "expires_at": exp, "expires_in": max(0, left)}
 
 # Used by: Tier-1 voice (live streaming) in notes/page.tsx startWispr + lib/voice-wispr.ts.
 # Flow: frontend POSTs here (empty JSON) → gets short-lived {access_token, ws_url} →

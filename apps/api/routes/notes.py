@@ -68,10 +68,6 @@ class BucketsIn(BaseModel):
     buckets: list[str]
     renames: dict[str, str] = {}  # old name → new name
 
-@router.get("/buckets")
-async def get_buckets(uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
-    return {"buckets": await _bucket_list(s, uid)}
-
 @router.put("/buckets")
 async def put_buckets(p: BucketsIn, uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
     """Save the list. Renamed buckets keep their notes (and locks); notes left in a bucket
@@ -105,7 +101,7 @@ async def _known_terms(s: AsyncSession, uid: str):
         {"u": uid})).first()
     return list(r[0] or []), list(r[1] or []), bk.normalize(r[2])
 
-# Used by: bucket routes, PUT /notes/{nid} — the user's bucket list (defaults when never edited).
+# Used by: PUT /buckets, GET /notes/stats, PUT /notes/{nid} — the user's bucket list (defaults when never edited).
 async def _bucket_list(s: AsyncSession, uid: str) -> list:
     return bk.normalize((await s.execute(text("SELECT buckets FROM users WHERE id=:u"), {"u": uid})).scalar())
 
@@ -396,7 +392,10 @@ async def one(nid: str, uid: str = Depends(me), s: AsyncSession = Depends(get_se
 # Used by: PUT /notes/{nid} — NoteDialog: edit text (re-enriches) or override title/type/tags/color.
 @router.put("/notes/{nid}")
 async def upd(nid: str, n: NoteUpd, uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
-    # Edit a note: raw_text re-runs enrichment; title/type/tags/color are plain validated overrides.
+    # Edit a note: raw_text re-runs enrichment; title/type/tags/color/bucket are plain validated overrides.
+    if not _is_uuid(nid) or not (await s.execute(
+            text("SELECT 1 FROM notes WHERE id = CAST(:i AS uuid) AND user_id=:u"), {"i": nid, "u": uid})).first():
+        raise HTTPException(404)
     if n.color is not None:
         c = n.color.strip().lower()
         if c and c not in COLOR_PRESETS and not HEX.match(c):
