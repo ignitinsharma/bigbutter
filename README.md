@@ -54,7 +54,9 @@ With `LLM_ENGINE=off` notes are still organized by simple rules.
 | `OPENAI_API_KEY` | Needed for any engine set to `api` |
 | `LLM_BASE_URL`, `LLM_MODEL` | Ollama endpoint + model (defaults `http://localhost:11434/v1`, `qwen2.5:1.5b`) |
 | `EXTRACTION_MODEL`, `SUMMARIZATION_MODEL`, `EMBEDDING_MODEL` | OpenAI model names (sensible defaults) |
-| `SEARCH_MIN_SIM`, `SEARCH_RERANK` | Search tuning (defaults `0.30`, `false`) |
+| `SEARCH_MIN_SIM` | Meaning score a note needs to count as a match (default `0.30`) |
+| `SEARCH_CANDIDATE_SIM` | Weak-meaning floor (default `0.20`): borderline notes the relevance check may keep, and the support a synonym-only keyword hit needs |
+| `SEARCH_RERANK` | AI relevance check on borderline results (default `false`). Turn on with a capable LLM (e.g. OpenAI) — small local models judge poorly. Strong matches are never removed by it |
 | `WISPR_API_KEY` | Optional — live voice streaming |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`, `S3_PREFIX`, `S3_ENDPOINT_URL`, `AUDIO_MAX_MB` | Optional — keep voice audio in a private S3 bucket (blank = audio not kept) |
 

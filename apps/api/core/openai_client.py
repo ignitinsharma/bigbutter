@@ -176,13 +176,35 @@ async def understand_query(q: str, known_categories: Optional[list] = None) -> d
     _qcache[key] = u
     return u
 
-async def rerank(q: str, notes: list[dict]) -> list[str]:
-    # Ask the LLM which of the top-10 candidates are truly relevant; returns kept ids.
-    ctx = "\n".join(f"{i}. [{n.get('category') or '-'}] {(n.get('raw_text') or '')[:200]}" for i, n in enumerate(notes))
-    r = await _chat_json(f"Search: \"{q}\"\nNotes:\n{ctx}\nWhich notes are actually relevant to the search meaning? "
-                         "Return ONLY JSON: {\"relevant\":[note numbers]}")
-    keep = {int(i) for i in (r.get("relevant") or []) if str(i).isdigit() and int(i) < len(notes)}
-    return [str(notes[i]["id"]) for i in sorted(keep)]
+JUDGE_PROMPT = """You check results for a search over someone's personal notes.
+Search: "{q}"
+Keep a note only if it is about the search topic: directly, or as a clear part of it
+(studying is part of education; an iPhone is a mobile phone; a dentist visit is health).
+Do NOT keep a note that merely shares a broad area (both "technology") or uses a word in another sense.
+Notes:
+{notes}
+Return ONLY JSON: {{"relevant":["n1","n4"]}} with the ids of the notes to keep, or {{"relevant":[]}} if none fit."""
+
+async def judge(q: str, notes: list[dict]) -> list[str]:
+    """Relevance check for borderline search hits: the ids (from `notes`) the LLM says fit the
+    search. Answers are ids like "n3" (a bare 3 is read the same way); unknown ids are ignored,
+    so the model can only remove candidates, never add notes. A reply without a "relevant" list
+    raises NotConfigured, so the caller shows the unchecked result instead of guessing."""
+    lines = []
+    for i, n in enumerate(notes, 1):
+        body = " ".join((n.get("summary") or n.get("raw_text") or "").split())[:220]
+        tags = ", ".join(n.get("tags") or [])
+        lines.append(f"n{i}: {n.get('title') or ''} — {body}" + (f" (tags: {tags})" if tags else ""))
+    r = await _chat_json(JUDGE_PROMPT.format(q=q.replace('"', "'"), notes="\n".join(lines)))
+    picked = r.get("relevant")
+    if not isinstance(picked, list):
+        raise NotConfigured("relevance check returned no list")
+    out = []
+    for x in picked:
+        m = re.fullmatch(r"n?(\d+)", str(x).strip().lower())
+        if m and 1 <= int(m.group(1)) <= len(notes):
+            out.append(str(notes[int(m.group(1)) - 1]["id"]))
+    return list(dict.fromkeys(out))
 
 async def transcribe(path: str) -> str:
     # Send an audio file to Whisper and return its transcript text.
