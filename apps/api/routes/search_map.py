@@ -6,10 +6,12 @@ from db.session import get_session
 from routes.notes import me, _known_categories, _row, _related
 from core.config import settings
 from typing import Optional
-from core.openai_client import embed, summarize, understand_query, rerank, core_query, NotConfigured
+from core.openai_client import embed, summarize, understand_query, judge, core_query, NotConfigured
 from core.local_embed import embed_local
 
 router = APIRouter()
+
+JUDGE_MAX = 20  # borderline candidates sent to the relevance check in one call
 
 NOTE_COLS = "n.id, n.user_id, n.raw_text, n.title, n.type, n.summary, n.tags, n.people, n.action_items, n.category, n.keywords, n.color, n.bucket, n.source, n.created_at, n.updated_at"
 
@@ -54,66 +56,89 @@ async def search(q: str, resp: Response, uid: str = Depends(me), s: AsyncSession
     # Expanded query text: terms + resolved sense + synonyms, deduped, order kept.
     qtext = " ".join(dict.fromkeys(filter(None, [u["terms"], u["category"], *u["expansions"]])))
 
+    # Relevance check (SEARCH_RERANK): gather more candidates (lower meaning floor), then the
+    # LLM keeps only the borderline ones that truly fit. Off → today's floor, no extra call.
+    judging = settings.search_rerank and settings.llm_engine != "off"
+    floor = min(settings.search_candidate_sim, settings.search_min_sim) if judging else settings.search_min_sim
+
     # 2. Semantic leg for both the user's words and the expanded query; best sim
     # per note wins, floored so a tiny DB doesn't return everything in the window.
     best: dict = {}  # note_id → best row across both query phrasings (core + expanded)
+    core_vec = None  # vector of the user's own words, reused by the keyword leg below
     for t in dict.fromkeys([core, qtext]):  # run both: user's words AND the expanded query
         qv = await _query_vec(t)  # embed with active engine; None → 501 below
         if qv is None:
             resp.status_code = 501  # no vector engine at all → frontend shows local filter
             return {"error": "not_configured"}
         qvec, emb_table = qv
+        core_vec = core_vec or qvec
         for r in (await s.execute(
             text(f"SELECT {NOTE_COLS}, 1 - (e.embedding <=> CAST(:qv AS vector)) AS sim FROM {emb_table} e "
                  "JOIN notes n ON n.id = e.note_id WHERE n.user_id=:u "
                  "ORDER BY e.embedding <=> CAST(:qv AS vector) LIMIT 20"),
             {"u": uid, "qv": qvec},
         )).mappings().all():
-            # Cosine similarity floor (default 0.30) so tiny DBs don't return everything;
-            # keep the higher-sim row when both phrasings match the same note.
-            if r["sim"] >= settings.search_min_sim and r["sim"] > best.get(str(r["id"]), {"sim": -1})["sim"]:
+            # Keep the higher-sim row when both phrasings match the same note.
+            if r["sim"] >= floor and r["sim"] > best.get(str(r["id"]), {"sim": -1})["sim"]:
                 best[str(r["id"])] = r
     sem = sorted(best.values(), key=lambda r: -r["sim"])  # best-first for the merge
 
     # 3. Keyword leg over raw/title/summary/category/keywords, OR across the user's words + expansions.
     # websearch_to_tsquery handles quoting/operators; ts_rank orders exact matches first.
+    # A hit on the user's own words always counts. A hit only on an AI-suggested synonym needs
+    # some meaning support too (≥ SEARCH_CANDIDATE_SIM): "food" for "apple fruit" must not pull
+    # in a note about food waste at an AI company.
+    own_q = " or ".join(dict.fromkeys(filter(None, [core, u["terms"]])))
     kw_q = " or ".join(dict.fromkeys(filter(None, [core, u["terms"], *u["expansions"]])))
-    kw = (await s.execute(
-        text(f"SELECT {NOTE_COLS} FROM notes n WHERE n.user_id=:u "
+    kw = [r for r in (await s.execute(
+        text(f"SELECT {NOTE_COLS}, n.search_tsv @@ websearch_to_tsquery('english', :own) AS own_hit, "
+             "coalesce(1 - (e.embedding <=> CAST(:cv AS vector)), 0) AS ksim "
+             f"FROM notes n LEFT JOIN {emb_table} e ON e.note_id = n.id WHERE n.user_id=:u "
              "AND n.search_tsv @@ websearch_to_tsquery('english', :q) "
              "ORDER BY ts_rank(n.search_tsv, websearch_to_tsquery('english', :q)) DESC LIMIT 20"),
-        {"u": uid, "q": kw_q},
+        {"u": uid, "q": kw_q, "own": own_q, "cv": core_vec},
     )).mappings().all()
+        if r["own_hit"] or max(r["ksim"], best.get(str(r["id"]), {"sim": 0})["sim"]) >= settings.search_candidate_sim]
+    kw_ids = {str(r["id"]) for r in kw}
+    strong_sem = {nid for nid, r in best.items() if r["sim"] >= settings.search_min_sim}
+    found = set(best) | kw_ids  # every note the meaning or keyword leg actually matched
 
-    # 4. Category leg: the resolved sense matches the note's stored category.
-    # Catches Apple-mobile vs Apple-fruit: same word, different stored category.
+    # 4. Category leg: the resolved sense matches the note's stored category (Apple-mobile vs
+    # Apple-fruit). It only BOOSTS notes the legs above found: a broad guess ("technology")
+    # would otherwise pull in every note filed under it, related or not.
     cat = []
     if u["category"]:
-        cat = (await s.execute(
+        cat = [r for r in (await s.execute(
             text(f"SELECT {NOTE_COLS} FROM notes n WHERE n.user_id=:u AND n.category <> '' "
                  "AND (lower(n.category) = :c OR lower(n.category) LIKE '%' || :c || '%' OR :c LIKE '%' || lower(n.category) || '%') "
                  "ORDER BY n.created_at DESC LIMIT 20"),
             {"u": uid, "c": u["category"]},
-        )).mappings().all()
+        )).mappings().all() if str(r["id"]) in found]
 
     legs = [sem, kw, cat]
     ordered = _rrf([[str(r["id"]) for r in leg] for leg in legs])  # one fused ranking from 3 legs
     by_id: dict = {}
     for leg in legs:
         for r in leg:
-            by_id.setdefault(str(r["id"]), _row(r))  # first leg wins the row body (sem has sim)
+            by_id.setdefault(str(r["id"]), _row({k: v for k, v in r.items() if k not in ("own_hit", "ksim")}))  # first leg wins (sem has sim)
     for r in sem:
         by_id[str(r["id"])]["sim"] = round(float(r["sim"]), 3)  # expose sim for debugging/sort
-    notes = [by_id[nid] for nid in ordered]  # fused order → response list
 
-    # Optional LLM rerank of the top 10 (SEARCH_RERANK=true); skipped silently when LLM down.
-    if settings.search_rerank and len(notes) > 1:
-        try:
-            keep = set(await rerank(q, notes[:10]))
-            if keep:
-                notes = [n for n in notes[:10] if str(n["id"]) in keep] + notes[10:]
-        except NotConfigured:
-            pass
+    # 5. Which candidates are shown. Confident = matched by meaning (≥ SEARCH_MIN_SIM) AND keyword:
+    # always kept, never judged, so a weak model can't drop good hits. Without the check,
+    # a note needs meaning ≥ SEARCH_MIN_SIM or a keyword hit (the behaviour before the check).
+    confident = strong_sem & kw_ids
+    plain = [nid for nid in ordered if nid in strong_sem or nid in kw_ids]
+    keep = plain
+    if judging:
+        unsure = [nid for nid in ordered if nid not in confident][:JUDGE_MAX]
+        if unsure:
+            try:
+                ok = set(await judge(q, [by_id[nid] for nid in unsure]))
+                keep = [nid for nid in ordered if nid in confident or nid in ok]
+            except NotConfigured:
+                keep = plain  # judge down or unparseable → exactly the unchecked result
+    notes = [by_id[nid] for nid in keep]
     ordered = [str(n["id"]) for n in notes]  # final id order → map highlight (focusIds)
     rel = await _related(s, uid, notes)  # "Connected to" per hit, across ALL user notes
     notes = [{**n, "related": rel.get(str(n["id"]), [])} for n in notes]

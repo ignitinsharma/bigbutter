@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:11434/v1"
     llm_model: str = "qwen2.5:1.5b"
     search_min_sim: float = 0.30  # cosine floor for the semantic leg
-    search_rerank: bool = False
+    search_rerank: bool = False  # AI relevance check on borderline hits — turn on with a capable LLM
+    search_candidate_sim: float = 0.20  # weak-meaning floor: relevance-check candidates + synonym-only keyword hits
     # S3 voice recordings (core/storage.py). Optional: no bucket/keys → audio isn't kept, voice works as before.
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
