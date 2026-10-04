@@ -37,8 +37,9 @@ function LoginForm() {
       location.href = next;
     } catch (e: unknown) {
       setTries(t => t + 1);
-      setErr((e as { status?: number })?.status === 401
-        ? "That email and password don't match. Check them and try again."
+      const st = (e as { status?: number })?.status;
+      setErr(st === 401 ? "That email and password don't match. Check them and try again."
+        : st === 429 ? "Too many failed attempts. Wait 15 minutes, then try again."
         : "Can't reach the server. Make sure the API is running, then try again.");
     } finally { setBusy(false); }
   };

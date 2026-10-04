@@ -39,15 +39,3 @@ export function subgraph<N extends { id: string; deg: number; r: number }>(
   return { nodes, links };
 }
 
-// List everything connected to one note, strongest overlap first (detail panels).
-export function linksOf(id: string, notes: Note[]): { other: Note; shared: string[] }[] {
-  const { links } = buildGraph(notes);
-  return links
-    .filter(l => l.source === id || l.target === id)
-    .map(l => ({
-      other: notes.find(e => e.id === (l.source === id ? l.target : l.source))!,
-      shared: l.shared,
-    }))
-    .filter(x => x.other)
-    .sort((a, b) => b.shared.length - a.shared.length);
-}

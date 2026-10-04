@@ -6,7 +6,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     wispr_api_key: str = ""
     wispr_ws_url: str = "wss://platform-api.wisprflow.ai/api/v1/dash/ws"
-    jwt_secret: str = "change-me"
+    env: str = "dev"  # "prod" → strong JWT_SECRET required, Secure cookies, no /docs
+    jwt_secret: str = "change-me"  # prod refuses to boot with this default (core/auth.py check_secret)
+    session_days: int = 30  # login lifetime: JWT exp + cookie max-age
+    cors_origins: str = "http://localhost:3000"  # comma-separated web origins allowed to call the API
     embedding_model: str = "text-embedding-3-small"
     extraction_model: str = "gpt-4o-mini"
     summarization_model: str = "gpt-4o-mini"
@@ -32,3 +35,6 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
+
+def is_prod() -> bool:
+    return settings.env.strip().lower() == "prod"

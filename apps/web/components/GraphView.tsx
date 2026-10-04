@@ -25,7 +25,7 @@ type GNode = SimulationNodeDatum & {
 
 type GLink = { source: string | GNode; target: string | GNode; shared: string[]; weight: number; tw: number };
 
-// ponytail: module cache keeps node positions across renders, like the prototype
+// ponytail: module cache keeps node positions across renders
 const pos: Record<string, { x: number; y: number }> = {};
 
 type Props = {

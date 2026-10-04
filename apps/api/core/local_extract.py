@@ -1,4 +1,4 @@
-"""Rule-based extraction fallback (zero deps, zero key). Port of prototype.html localExtract.
+"""Rule-based extraction fallback (zero deps, zero key).
 
 Rough but deterministic: keyword/type regexes, frequency tags reusing known
 ones, capitalised-word people, first-sentence title/summary. Anything the

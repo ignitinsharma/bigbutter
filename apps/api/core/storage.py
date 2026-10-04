@@ -76,14 +76,14 @@ def delete(keys: List[str]) -> None:
         _client().delete_objects(Bucket=settings.s3_bucket,
                                  Delete={"Objects": [{"Key": k} for k in keys[i:i + 1000]], "Quiet": True})
 
-# Used by: routes/voice.py transcribe_audio (row insert), scripts/backfill_recording_urls.py.
+# Used by: routes/voice.py transcribe_audio (row insert).
 def object_url(key: str) -> str:
     # Permanent address of the object (bucket is private: opening it directly → AccessDenied, by design).
     if settings.s3_endpoint_url:
         return f"{settings.s3_endpoint_url.rstrip('/')}/{settings.s3_bucket}/{key}"
     return f"https://{settings.s3_bucket}.s3.{settings.aws_region}.amazonaws.com/{key}"
 
-# Used by: routes/voice.py (insert + _fresh_link), routes/notes.py one(), scripts/backfill_recording_urls.py.
+# Used by: routes/voice.py (row insert), routes/notes.py one().
 def presign_get(key: str, ttl: int = PRESIGN_TTL) -> Tuple[str, datetime.datetime]:
     # (url, expires_at) — a playable link that stops working at expires_at (UTC).
     url = _client().generate_presigned_url(
@@ -96,7 +96,7 @@ def signed_by(url: str) -> str:
     cred = parse_qs(urlparse(url or "").query).get("X-Amz-Credential", [""])[0]
     return cred.split("/")[0]
 
-# Used by: routes/voice.py _fresh_link, routes/notes.py one().
+# Used by: routes/notes.py one().
 def needs_resign(url: Optional[str], expires_at: Optional[datetime.datetime]) -> bool:
     """Stored links die at expiry — and immediately if the signing key is rotated/deleted.
     True when missing, expiring within RESIGN_MARGIN, or signed by a different key than ours."""

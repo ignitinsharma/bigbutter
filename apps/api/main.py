@@ -8,11 +8,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from db.session import Session
-from core.auth import hash_password
-from core.config import settings
+from core.auth import hash_password, check_secret
+from core.config import settings, is_prod
 from routes.auth import router as auth_r
 from routes.notes import router as notes_r
-from routes.ai import router as ai_r
 from routes.voice import router as voice_r
 from routes.search_map import router as misc_r
 
@@ -73,14 +72,16 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_warm_models, name="warm-models", daemon=True).start()  # never blocks boot
     asyncio.create_task(_warm_db())
     yield  # boot done → app now serves requests until shutdown.
-# Used by: uvicorn main:app — creates the app, runs lifespan on startup.
-app = FastAPI(title="bigbutter api", lifespan=lifespan)
-# Allow the Next.js dev server (localhost:3000) to call the API with cookies.
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-# Mount every feature router: /auth, /notes, /extract+/embed, /voice/*, /search + /map.
+check_secret()  # ENV=prod + weak JWT_SECRET → refuse to boot (forgeable sessions)
+# Used by: uvicorn main:app — creates the app, runs lifespan on startup. API docs only outside prod.
+_docs = {} if not is_prod() else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+app = FastAPI(title="bigbutter api", lifespan=lifespan, **_docs)
+# Allow the web app (CORS_ORIGINS, default the Next.js dev server) to call the API with cookies.
+app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
+                   allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# Mount every feature router: /auth, /notes, /voice/*, /search + /map.
 app.include_router(auth_r)
 app.include_router(notes_r)
-app.include_router(ai_r)
 app.include_router(voice_r)
 app.include_router(misc_r)
 
