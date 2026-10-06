@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     wispr_api_key: str = ""
     wispr_ws_url: str = "wss://platform-api.wisprflow.ai/api/v1/dash/ws"
+    wispr_token_url: str = "https://platform-api.wisprflow.ai/api/v1/dash/generate_access_token"
     env: str = "dev"  # "prod" → strong JWT_SECRET required, Secure cookies, no /docs
     jwt_secret: str = "change-me"  # prod refuses to boot with this default (core/auth.py check_secret)
     session_days: int = 30  # login lifetime: JWT exp + cookie max-age

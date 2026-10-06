@@ -3,32 +3,37 @@
 import asyncio
 import threading
 import time
+import docs
+import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from db.session import Session
+from core import storage
 from core.auth import hash_password, check_secret
 from core.config import settings, is_prod
+from core.local_embed import embed_local
 from routes.auth import router as auth_r
 from routes.notes import router as notes_r
 from routes.voice import router as voice_r
 from routes.search_map import router as misc_r
+from core.docs import doc
 
 # Used by: lifespan — first save after a restart used to pay ~13s (MiniLM) + ~6s (Qwen) of model loading.
+@doc(docs.MAIN_WARM_MODELS)
 def _warm_models() -> None:
-    """Load the on-device models in a thread so the first request finds them ready."""
     t0 = time.perf_counter()
     steps = []
     if settings.embed_engine == "local":
         try:
-            from core.local_embed import embed_local
             embed_local("warm up")
             steps.append("minilm")
         except Exception as e:
             print(f"warm-up: embeddings skipped ({e!r})")
     if settings.transcribe_engine == "local":
         try:
+            # Delayed on purpose: core.local_whisper imports whisper + torch (seconds, ~GB) at load.
             from core.local_whisper import _model_once
             _model_once()
             steps.append("whisper")
@@ -36,7 +41,6 @@ def _warm_models() -> None:
             print(f"warm-up: whisper skipped ({e!r})")
     if settings.llm_engine == "local":
         try:  # Ollama's native API: an empty prompt just loads the model into memory
-            import httpx
             base = settings.llm_base_url.rstrip("/").removesuffix("/v1")  # http://localhost:11434
             httpx.post(f"{base}/api/generate", json={"model": settings.llm_model, "prompt": ""}, timeout=60)
             steps.append("ollama")
@@ -65,7 +69,6 @@ async def lifespan(app: FastAPI):
             )
             await s.commit()
         print(f"env user ensured: {email}")
-    from core import storage
     if storage.half_configured():  # bucket without keys (or vice versa) → recordings silently off
         print("warning: S3 is partly configured (need S3_BUCKET + AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY) — voice audio won't be kept")
     print(f"voice storage: {'s3://' + settings.s3_bucket if storage.enabled() else 'off'}")

@@ -40,8 +40,15 @@ export function createWisprVoice(opts: WisprOpts): { start: () => void; stop: ()
     try { node?.disconnect(); } catch { /* noop */ }
     try { ctx?.close(); } catch { /* noop */ }
     try { stream?.getTracks().forEach(t => t.stop()); } catch { /* noop */ }
-    try { if (ws && ws.readyState === WebSocket.OPEN) ws.close(); } catch { /* noop */ }
+    try { ws?.close(); } catch { /* noop */ }
     ws = null; ctx = null; stream = null; node = null;
+  };
+
+  // Error path: release the mic first, then report (the page drops its handle on onError).
+  const fail = (msg: string) => {
+    stopped = true;
+    cleanup();
+    opts.onError(msg);
   };
 
   // Merge settled + interim speech into the draft (prefixed with prior text).
@@ -60,6 +67,8 @@ export function createWisprVoice(opts: WisprOpts): { start: () => void; stop: ()
       opts.onError("not-allowed");
       return;
     }
+    // Discarded while the permission prompt was open → release the mic, open nothing.
+    if (stopped) { cleanup(); return; }
     ws = new WebSocket(opts.wsUrl);
     ws.onopen = () => {
       ws?.send(JSON.stringify({
@@ -71,18 +80,19 @@ export function createWisprVoice(opts: WisprOpts): { start: () => void; stop: ()
     ws.onmessage = ev => {
       let m: { status?: string; error?: string; body?: { text?: string; is_final?: boolean } };
       try { m = JSON.parse(ev.data); } catch { return; }
-      if (m.error) { opts.onError("provider:" + m.error); return; }
+      if (m.error) { fail("provider:" + m.error); return; }
       if (m.status === "text" && m.body?.text) {
         if (m.body.is_final) { settled = (settled + " " + m.body.text).trim(); emit(""); }
         else emit(m.body.text);
       }
     };
-    ws.onerror = () => opts.onError("network");
-    ws.onclose = () => { if (!stopped) opts.onEnd(); };
+    ws.onerror = () => { if (!stopped) fail("network"); };
+    ws.onclose = () => { if (!stopped) { stopped = true; cleanup(); opts.onEnd(); } };
     try {
       ctx = new AudioContext({ sampleRate: 16000 });
       const src = ctx.createMediaStreamSource(stream);
       await ctx.audioWorklet.addModule("/wispr-worklet.js");
+      if (stopped) { cleanup(); return; }
       node = new AudioWorkletNode(ctx, "wispr-capture");
       node.port.onmessage = (e: MessageEvent) => {
         if (e.data?.type !== "audio" || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -96,8 +106,8 @@ export function createWisprVoice(opts: WisprOpts): { start: () => void; stop: ()
       };
       src.connect(node);
     } catch {
-      cleanup();
-      opts.onError("audio-capture");
+      if (stopped) cleanup();
+      else fail("audio-capture");
     }
   };
 

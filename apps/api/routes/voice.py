@@ -1,17 +1,5 @@
 # voice routes: shhh... listening (with permission).
-"""Voice → text, with the audio kept in S3 (core/storage.py).
-
-Flow (Whisper upload tier, notes/page.tsx):
-  stop recording → POST /voice/transcribe (audio + duration_ms)
-    ├ store():  S3 upload → INSERT recordings row (s3_url, presigned_url, uploaded_at …)
-    └ Whisper on the same bytes                       ← both run in parallel
-  → {transcript, recording_id} → draft → Save (POST /notes) links the clip to the note
-  → BackgroundTask _finalize writes status + transcript onto the row.
-Failure rules: upload fails → no row, transcript still returned (recording_id null);
-row insert fails → uploaded object deleted; Whisper fails but audio stored → 502 with
-recording_id so the UI offers Retry (POST /voice/recordings/{id}/retry reads it back).
-Playback: GET /notes/{id} returns each clip's stored 7-day link, re-signed when stale.
-"""
+from routes.docs import VOICE as __doc__  # module docstring lives in routes/docs.py
 import asyncio
 import logging
 import os
@@ -28,6 +16,8 @@ from routes.notes import me
 from core import storage
 from core.config import settings
 from core.openai_client import transcribe, NotConfigured
+from core.docs import doc
+from routes import docs
 
 router = APIRouter(prefix="/voice")
 log = logging.getLogger("bigbutter.voice")
@@ -47,6 +37,7 @@ def _can_transcribe() -> bool:
 async def _transcribe_path(path: str) -> Tuple[str, str]:
     # (text, engine). Local Whisper is CPU-bound → threadpool so the S3 upload runs alongside.
     if settings.transcribe_engine == "local":
+        # Delayed on purpose: core.local_whisper imports whisper + torch (seconds, ~GB) at load.
         from core.local_whisper import transcribe_local
         return await run_in_threadpool(transcribe_local, path), "local"
     return await transcribe(path), "api"
@@ -95,9 +86,9 @@ async def _own_recording(s: AsyncSession, uid: str, rid: str):
 # bytes → {transcript, recording_id} → editable draft → Save links the recording (POST /notes).
 # S3 off → same as before (transcript only, recording_id null). Failure rules: module docstring.
 @router.post("/transcribe")
+@doc(docs.VOICE_TRANSCRIBE_AUDIO)
 async def transcribe_audio(req: Request, resp: Response, tasks: BackgroundTasks, audio: UploadFile = File(...),
                            duration_ms: int = Form(0), uid: str = Depends(me)):
-    """Store the clip in S3 and transcribe it at the same time; returns text + recording id."""
     if not _can_transcribe():
         resp.status_code = 501  # keyless → frontend shows "not configured", keeps Tier-3 browser dictation
         return {"error": "not_configured"}
@@ -161,8 +152,8 @@ async def transcribe_audio(req: Request, resp: Response, tasks: BackgroundTasks,
 # Used by: Retry on the "Couldn't transcribe — your audio is saved" notice (notes/page.tsx).
 # The only normal path that reads audio back from S3.
 @router.post("/recordings/{rid}/retry")
+@doc(docs.VOICE_RETRY)
 async def retry(rid: str, resp: Response, uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
-    """Re-transcribe a stored clip — pulls the audio back from S3."""
     row = await _own_recording(s, uid, rid)
     if not row or not storage.enabled():
         raise HTTPException(404)
@@ -191,15 +182,15 @@ async def retry(rid: str, resp: Response, uid: str = Depends(me), s: AsyncSessio
 # the browser; this mints a 1-hour user-scoped client token instead. No key → 501,
 # and the UI steps down to Tier-2 upload. Wispr API down → 502 provider_error.
 @router.post("/token")
+@doc(docs.VOICE_MINT_TOKEN)
 async def mint_token(resp: Response, uid: str = Depends(me)):
-    """Mint a short-lived Wispr client token. Org key never leaves the backend."""
     if not settings.wispr_api_key:
         resp.status_code = 501
         return {"error": "not_configured"}
     try:
         async with httpx.AsyncClient(timeout=15) as c:
             r = await c.post(
-                "https://platform-api.wisprflow.ai/api/v1/dash/generate_access_token",
+                settings.wispr_token_url,
                 headers={"Authorization": f"Bearer {settings.wispr_api_key}"},
                 json={"client_id": uid, "duration_secs": 3600},
             )
