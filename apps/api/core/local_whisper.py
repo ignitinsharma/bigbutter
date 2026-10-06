@@ -1,10 +1,5 @@
 # local_whisper: tiny model, big ears, zero API bill.
-"""Local Whisper engine (tiny, M1-friendly). No API key, works offline.
-
-Model loads once at import (~75MB download on first run to ~/.cache/whisper).
-fp16=False: required on CPU/MPS paths to avoid garbage output.
-"""
-
+from core.docs import LOCAL_WHISPER as __doc__  # module docstring lives in core/docs.py
 import whisper
 
 _model = None

@@ -8,6 +8,8 @@ from core.config import settings
 from typing import Optional
 from core.openai_client import embed, summarize, understand_query, judge, core_query, NotConfigured
 from core.local_embed import embed_local
+from core.docs import doc
+from routes import docs
 
 router = APIRouter()
 
@@ -26,8 +28,8 @@ def _rrf(rank_lists: list[list[str]], k: int = 60) -> list[str]:
     return sorted(scores, key=lambda nid: scores[nid], reverse=True)
 
 # Used by: search() — embeds one query text with the active engine (local MiniLM vs cloud).
+@doc(docs.SEARCH_MAP_QUERY_VEC)
 async def _query_vec(qtext: str):
-    """(vector literal, table) for the active embed engine, or None when unavailable."""
     # Local → 384-dim MiniLM + note_embeddings_local; cloud → 1536-dim + note_embeddings.
     # None means "can't search at all" → caller returns 501 (frontend falls back to local filter).
     if settings.embed_engine == "local":
@@ -157,9 +159,8 @@ async def search(q: str, resp: Response, uid: str = Depends(me), s: AsyncSession
 # Used by: GET /map — map tab (full graph) + search mode (ids=hits, subgraph of hits).
 # Frontend uses {nodes, edges}: d3-force layout, click detail, hover neighbourhood.
 @router.get("/map")
+@doc(docs.SEARCH_MAP_MMAP)
 async def mmap(ids: Optional[str] = None, uid: str = Depends(me), s: AsyncSession = Depends(get_session)):
-    """Tag/person/category graph. `ids` (comma-separated) scopes it to a search's
-    hits: only those nodes, edges among them, degree recomputed inside."""
     # Load every note's link keys (tags/people/category), lowercased for case-insensitive edges.
     rows = (await s.execute(
         text("SELECT id, title, type, summary, tags, people, category, color FROM notes WHERE user_id=:u"),

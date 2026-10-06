@@ -1,15 +1,8 @@
-"""Sweep voice clips never attached to a note (cancelled drafts, crashed uploads).
-
-DB-driven: only rows with note_id IS NULL older than N hours are
-touched, so audio behind a saved note can never be deleted. S3 object first,
-then the row; deleting a key that never made it to S3 is a no-op.
-
-Run: `python3 scripts/prune_recordings.py [hours=24]` (manually or from cron).
-"""
 import sys
 from pathlib import Path
 # Let `python scripts/x.py` import routes/core/db as top-level packages.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.docs import PRUNE_RECORDINGS as __doc__  # module docstring lives in scripts/docs.py
 import asyncio
 from sqlalchemy import text
 from db.session import engine

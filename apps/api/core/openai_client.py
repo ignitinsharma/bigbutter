@@ -8,6 +8,10 @@ from openai import AsyncOpenAI
 from core.config import settings
 from core.local_extract import local_extract
 from core.buckets import normalize as normalize_buckets, match as match_bucket
+from core.prompts import EXTRACT_PROMPT, EXTRACT_INPUT, SCHEMA_ECHO, QUERY_PROMPT, QUERY_INPUT, JUDGE_PROMPT, SUMMARIZE_PROMPT
+from core.wordlists import SEARCH_FILLER
+from core import docs
+from core.docs import doc
 
 _client = None
 _local = None
@@ -28,9 +32,8 @@ def client():
         _client = AsyncOpenAI(api_key=_require_key())
     return _client
 
+@doc(docs.OPENAI_CLIENT_LLM)
 def llm() -> tuple:
-    """Chat client + model for LLM_ENGINE. Local = Ollama's OpenAI-compatible /v1,
-    so OpenAI day is an env flip. Off → NotConfigured (callers fail open)."""
     global _local
     if settings.llm_engine == "local":
         if _local is None:
@@ -41,9 +44,8 @@ def llm() -> tuple:
         raise NotConfigured("LLM_ENGINE=off")
     return client(), settings.extraction_model
 
+@doc(docs.OPENAI_CLIENT_CHAT_JSON)
 async def _chat_json(prompt: str) -> dict:
-    """One JSON-mode completion, one retry on bad JSON. Unreachable runtime or
-    unparseable output → NotConfigured so every caller keeps its fallback."""
     c, model = llm()
     for _ in range(2):
         try:
@@ -52,7 +54,7 @@ async def _chat_json(prompt: str) -> dict:
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
             )
-        except (openai.APIConnectionError, openai.APITimeoutError, openai.NotFoundError) as e:
+        except openai.APIError as e:  # unreachable, timeout, 404, 429, 401, 5xx → caller's fallback
             raise NotConfigured(f"llm unavailable: {e}")
         out = (r.choices[0].message.content or "").replace("```json", "").replace("```", "").strip()
         try:
@@ -64,21 +66,13 @@ async def _chat_json(prompt: str) -> dict:
 async def embed(text: str) -> list[float]:
     # Embed text into a 1536-dim vector for the pgvector similarity leg.
     _require_key()
-    r = await client().embeddings.create(model=settings.embedding_model, input=text)
+    try:
+        r = await client().embeddings.create(model=settings.embedding_model, input=text)
+    except openai.APIError as e:  # rate limit / bad key / outage → same fallback as no key
+        raise NotConfigured(f"embeddings unavailable: {e}")
     return r.data[0].embedding
 
 NOTE_TYPES = ("idea", "task", "note", "person", "link", "expense", "journal")
-
-EXTRACT_PROMPT = """Turn this raw personal capture into one structured record.
-Return ONLY JSON: {"title":"under 8 words","type":"idea|task|note|person|link|expense|journal","summary":"1-2 short sentences, fix grammar, invent nothing","bucket":"exactly one name from the Buckets list","category":"1-3 lowercase words: what the note is ABOUT","keywords":["3-8 lowercase synonyms or broader terms for the category"],"tags":["2-5 lowercase topics"],"people":["names"],"action_items":["imperative phrases if actionable"]}
-"task" only if they must DO something. "idea" for proposals and hypotheses. "expense" if money moved. "journal" for reflection. "note" is the fallback.
-category resolves the word's MEANING in context — the same word can mean different things:
-- "Apple is a great fruit" → category "fruit", keywords ["fruit","food","produce","healthy snack"]
-- "Apple is a good mobile" → category "mobile phone", keywords ["phone","smartphone","mobile","device","iphone"]
-- "Samsung is a mobile" → category "mobile phone", keywords ["phone","smartphone","mobile","device","android"]
-bucket = the broad life area, copied exactly from the Buckets list below; "Other" only if none fits.
-people = human names only, never brands or companies.
-Reuse an existing tag or category whenever it fits — inventing a synonym leaves notes unconnected forever."""
 
 def _words(xs, n: int) -> list:
     # Lowercase + dedupe + trim a string list to n items (tags/keywords shape).
@@ -90,7 +84,7 @@ async def extract_note(text: str, known_tags: Optional[list] = None, known_categ
     tags = ", ".join((known_tags or [])[:40]) or "none"
     cats = ", ".join((known_categories or [])[:40]) or "none"
     bl = buckets or normalize_buckets(None)
-    rec = await _chat_json(f"{EXTRACT_PROMPT}\n\nBuckets: {', '.join(bl)}\nExisting tags: {tags}\nExisting categories: {cats}\n\nCapture:\n\"\"\"{text}\"\"\"")
+    rec = await _chat_json(EXTRACT_PROMPT + EXTRACT_INPUT.format(buckets=', '.join(bl), tags=tags, cats=cats, text=text))
     rec["bucket"] = match_bucket(str(rec.get("bucket") or ""), bl) or ""  # off-list → "" (caller's fallback decides)
     if rec.get("type") not in NOTE_TYPES:
         rec["type"] = "note"
@@ -111,48 +105,28 @@ def _stems(s: str) -> set:
     # 4-char word stems for fuzzy overlap checks (titles, query relevance).
     return {w[:4] for w in re.findall(r"[a-z0-9]+", s.lower()) if len(w) >= 3}
 
+@doc(docs.OPENAI_CLIENT_JUNK_TITLE)
 def _junk_title(title: str, raw: str) -> bool:
-    """Small local models echo the schema ("under 8 words") or answer with the
-    type ("task"). Titles like that — or ones sharing no word stem with the
-    capture — fall back to the rule title (first words of the note)."""
     low = title.lower().strip(" .\"'")
     return (len(low.split()) < 2 or low in NOTE_TYPES or "8 words" in low
             or not (_stems(title) & _stems(raw)))
 
-# Phrases from EXTRACT_PROMPT's schema; a summary containing them is an echo, not a summary.
-_SCHEMA_ECHO = ("short sentences", "invent nothing", "fix grammar")
-
+@doc(docs.OPENAI_CLIENT_JUNK_SUMMARY)
 def _junk_summary(summary: str) -> bool:
-    """Models sometimes return the schema placeholder ("1-2 short sentences, fix
-    grammar, invent nothing") as the summary — fall back to the rule summary."""
     low = summary.lower()
-    return any(p in low for p in _SCHEMA_ECHO)
-
-QUERY_PROMPT = """You turn a search over personal notes into retrieval hints.
-Return ONLY JSON: {"terms":"the core subject words, no question filler","category":"1-3 lowercase words or empty","expansions":["3-6 lowercase synonyms / related words"]}
-Resolve the MEANING: "best phone" → {"terms":"best phone","category":"mobile phone","expansions":["smartphone","mobile","phone","device","iphone","android"]}
-Strip filler: "is there any kind of fruit notes present?" → {"terms":"fruit","category":"fruit","expansions":["fruit","food","produce"]}
-Prefer one of the existing categories when it matches."""
+    return any(p in low for p in SCHEMA_ECHO)
 
 _qcache: dict = {}
 
-# Words that describe the search itself, not what it's about.
-_META = set(
-    "notes note related relating regarding about any show me my find all there present kind kinds of "
-    "the a an some please what which do does i have has is are to for on with stuff things thing anything "
-    "get list search give tell".split()
-)
-
+@doc(docs.OPENAI_CLIENT_CORE_QUERY)
 def core_query(q: str) -> str:
-    """The user's own subject words: "notes related to mobile phones" → "mobile phones".
-    Deterministic, model-independent; falls back to the query when nothing's left."""
-    words = [w for w in re.findall(r"[a-z0-9]+", q.lower()) if w not in _META]
+    words = [w for w in re.findall(r"[a-z0-9]+", q.lower()) if w not in SEARCH_FILLER]
     return " ".join(words) or q.strip()
 
+@doc(docs.OPENAI_CLIENT_ON_TOPIC)
 def _on_topic(value: str, core: str) -> bool:
-    """LLM output is usable if it isn't pure filler and shares a word stem with the query."""
     words = re.findall(r"[a-z0-9]+", value.lower())
-    return bool(words) and not all(w in _META for w in words) and bool(_stems(value) & _stems(core))
+    return bool(words) and not all(w in SEARCH_FILLER for w in words) and bool(_stems(value) & _stems(core))
 
 async def understand_query(q: str, known_categories: Optional[list] = None) -> dict:
     # Turn a search string into {terms, category, expansions}; cached per (query, categories).
@@ -160,7 +134,7 @@ async def understand_query(q: str, known_categories: Optional[list] = None) -> d
     key = (q.strip().lower(), cats)
     if key in _qcache:
         return _qcache[key]
-    r = await _chat_json(f"{QUERY_PROMPT}\n\nExisting categories: {cats}\n\nSearch: \"{q}\"")
+    r = await _chat_json(QUERY_PROMPT + QUERY_INPUT.format(cats=cats, q=q))
     core = core_query(q)
     terms = str(r.get("terms") or "").strip()
     category = " ".join(str(r.get("category") or "").lower().split()[:3]) or None
@@ -176,20 +150,8 @@ async def understand_query(q: str, known_categories: Optional[list] = None) -> d
     _qcache[key] = u
     return u
 
-JUDGE_PROMPT = """You check results for a search over someone's personal notes.
-Search: "{q}"
-Keep a note only if it is about the search topic: directly, or as a clear part of it
-(studying is part of education; an iPhone is a mobile phone; a dentist visit is health).
-Do NOT keep a note that merely shares a broad area (both "technology") or uses a word in another sense.
-Notes:
-{notes}
-Return ONLY JSON: {{"relevant":["n1","n4"]}} with the ids of the notes to keep, or {{"relevant":[]}} if none fit."""
-
+@doc(docs.OPENAI_CLIENT_JUDGE)
 async def judge(q: str, notes: list[dict]) -> list[str]:
-    """Relevance check for borderline search hits: the ids (from `notes`) the LLM says fit the
-    search. Answers are ids like "n3" (a bare 3 is read the same way); unknown ids are ignored,
-    so the model can only remove candidates, never add notes. A reply without a "relevant" list
-    raises NotConfigured, so the caller shows the unchecked result instead of guessing."""
     lines = []
     for i, n in enumerate(notes, 1):
         body = " ".join((n.get("summary") or n.get("raw_text") or "").split())[:220]
@@ -221,8 +183,8 @@ async def summarize(query: str, notes: list[dict]) -> str:
     try:
         r = await c.chat.completions.create(
             model=model, temperature=0.2,
-            messages=[{"role": "user", "content": f"Notes:\n{ctx}\n\nThey searched for '{query}'. Answer in 1-2 short lines using ONLY these notes."}],
+            messages=[{"role": "user", "content": SUMMARIZE_PROMPT.format(ctx=ctx, query=query)}],
         )
-    except (openai.APIConnectionError, openai.APITimeoutError, openai.NotFoundError) as e:
+    except openai.APIError as e:
         raise NotConfigured(f"llm unavailable: {e}")
     return (r.choices[0].message.content or "").strip()

@@ -1,23 +1,14 @@
 # storage: voice clips in a private S3 bucket (keys in the DB, short-lived links only).
-"""S3 helpers for voice recordings — the only module that talks to AWS.
-
-Layout: one private bucket (Block Public Access on), keys
-recordings/<user-id>/<yyyy>/<mm>/<recording-id>.<ext>, encrypted at rest (SSE-S3).
-The browser never talks to S3: audio goes browser → API → S3, and playback uses
-presigned links the API hands out.
-
-DB keeps per clip (table `recordings`): s3_key, s3_url (permanent address, not
-openable — bucket is private), presigned_url (playable, 7 days) + its expiry.
-Stored links are re-signed on read when <1h is left or the signing key changed.
-
-Sync boto3 on purpose: routes call these through run_in_threadpool so the
-upload runs alongside transcription without blocking the event loop.
-"""
+from core.docs import STORAGE as __doc__  # module docstring lives in core/docs.py
 import datetime
 from functools import lru_cache
 from typing import List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
+import boto3
+from botocore.config import Config
 from core.config import settings
+from core import docs
+from core.docs import doc
 
 PRESIGN_TTL = 604800  # 7 days — the SigV4 maximum for IAM-user keys
 RESIGN_MARGIN = datetime.timedelta(hours=1)  # re-sign links with less than this left
@@ -41,8 +32,6 @@ def half_configured() -> bool:
 @lru_cache(maxsize=1)
 def _client():
     # One cached client; bounded timeouts so a slow S3 fails in ~30s instead of hanging a request.
-    import boto3
-    from botocore.config import Config
     return boto3.client(
         "s3", region_name=settings.aws_region,
         aws_access_key_id=settings.aws_access_key_id,
@@ -56,7 +45,7 @@ def _client():
 # Used by: routes/voice.py transcribe_audio — names the object before upload.
 def audio_key(uid: str, rid: str, ext: str) -> str:
     # recordings/<user>/<yyyy>/<mm>/<recording-id>.<ext> — per-user prefix, sortable by month.
-    d = datetime.datetime.utcnow()
+    d = datetime.datetime.now(datetime.timezone.utc)
     return f"{settings.s3_prefix.strip('/')}/{uid}/{d:%Y/%m}/{rid}{ext}"
 
 # Used by: routes/voice.py transcribe_audio (store chain).
@@ -97,9 +86,8 @@ def signed_by(url: str) -> str:
     return cred.split("/")[0]
 
 # Used by: routes/notes.py one().
+@doc(docs.STORAGE_NEEDS_RESIGN)
 def needs_resign(url: Optional[str], expires_at: Optional[datetime.datetime]) -> bool:
-    """Stored links die at expiry — and immediately if the signing key is rotated/deleted.
-    True when missing, expiring within RESIGN_MARGIN, or signed by a different key than ours."""
     if not url or not expires_at:
         return True
     if expires_at.tzinfo is None:

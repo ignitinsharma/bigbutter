@@ -1,8 +1,4 @@
-"""Local embeddings engine (all-MiniLM-L6-v2, 384 dims). No API key, works offline.
-
-Model loads once at import (~80MB download on first run to ~/.cache/huggingface).
-Dims differ from cloud (1536) on purpose — each engine has its own table.
-"""
+from core.docs import LOCAL_EMBED as __doc__  # module docstring lives in core/docs.py
 
 _model = None
 
@@ -10,6 +6,8 @@ def _model_once():
     # Load the MiniLM model once and reuse it — avoids ~80MB reload per note.
     global _model
     if _model is None:
+        # Delayed on purpose: torch + sentence_transformers take seconds and ~GB to load;
+        # only paid when EMBED_ENGINE=local actually embeds something.
         from sentence_transformers import SentenceTransformer
         _model = SentenceTransformer("all-MiniLM-L6-v2")
     return _model

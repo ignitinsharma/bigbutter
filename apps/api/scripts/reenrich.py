@@ -1,14 +1,8 @@
-"""Re-run extraction + embedding for every note (optionally one user's).
-
-Run once after Ollama is up (or keys land) so older notes get category,
-keywords, summary and a vector: `python3 scripts/reenrich.py [email]`.
-`--buckets` only (re)picks the bucket of notes the user hasn't set by hand —
-titles, tags and summaries you edited stay as they are.
-"""
 import sys
 from pathlib import Path
 # Let `python scripts/x.py` import routes/core/db as top-level packages.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.docs import REENRICH as __doc__  # module docstring lives in scripts/docs.py
 import asyncio
 import time
 from sqlalchemy import text

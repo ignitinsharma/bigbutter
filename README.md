@@ -15,7 +15,7 @@ related notes, and makes everything searchable by meaning.
 ```bash
 # 1. Database — Neon, or a local pgvector Postgres:
 docker compose up -d db
-#    then apply apps/api/db/migrations/*.sql in order (001 → 010)
+#    then apply apps/api/db/migrations/*.sql in order (001 → 011)
 
 # 2. API
 cd apps/api

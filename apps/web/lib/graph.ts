@@ -5,9 +5,10 @@ const lc = (s: string) => String(s).toLowerCase().trim();
 
 export type GraphNode = { id: string; note: Note; deg: number; r: number };
 export type GraphLink = { source: string; target: string; shared: string[]; weight: number };
+export type Graph = { nodes: GraphNode[]; links: GraphLink[] };
 
 // Build nodes + edges: one node per note, edge iff shared tag/person/category.
-export function buildGraph(notes: Note[]): { nodes: GraphNode[]; links: GraphLink[] } {
+export function buildGraph(notes: Note[]): Graph {
   const links: GraphLink[] = [];
   for (let i = 0; i < notes.length; i++) for (let j = i + 1; j < notes.length; j++) {
     const a = notes[i], b = notes[j];

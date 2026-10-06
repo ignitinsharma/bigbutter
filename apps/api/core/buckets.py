@@ -1,10 +1,8 @@
-"""Buckets: a small, closed set of life areas every note lands in exactly one of.
-
-The LLM picks from the user's list (EXTRACT_PROMPT); anything off-list falls back to
-MiniLM similarity against each bucket's description, then to Other. Tags and
-category stay free-text underneath — buckets are the stable top level.
-"""
+from core.docs import BUCKETS as __doc__  # module docstring lives in core/docs.py
 from typing import Optional
+from core.local_embed import embed_local
+from core import docs
+from core.docs import doc
 
 OTHER = "Other"
 
@@ -28,9 +26,8 @@ def clean(name: str) -> str:
     # Collapse whitespace, cap length; keeps the user's casing.
     return " ".join(str(name or "").split())[:MAX_LEN]
 
+@doc(docs.BUCKETS_NORMALIZE)
 def normalize(names: Optional[list]) -> list:
-    """The user's list (NULL → defaults), de-duped case-insensitively, capped,
-    with Other always present and last."""
     src = list(DEFAULTS) if names is None else names
     out, seen = [], {OTHER.lower()}
     for n in src:
@@ -53,11 +50,8 @@ def _cos(a: list, b: list) -> float:
     nb = sum(y * y for y in b) ** 0.5
     return dot / (na * nb) if na and nb else 0.0
 
+@doc(docs.BUCKETS_PICK_BY_VECTOR)
 def pick_by_vector(vec: list, buckets: list, min_sim: float = 0.2) -> str:
-    """No-LLM fallback: the bucket whose description is closest to the note's MiniLM
-    vector. Custom buckets are described by their name alone. Below min_sim → Other.
-    Raises RuntimeError when the local model is missing (caller falls back to Other)."""
-    from core.local_embed import embed_local
     best, score = OTHER, min_sim
     for b in buckets:
         if b == OTHER:
